@@ -1,9 +1,13 @@
-
+import logging
 import pandas as pd
 
 from database.duckdb_storage import Repository
+from ingestion.universe import load_wig_symbols
 from ingestion.prices import fetch_eod_prices
 from config.config import load_config
+
+logger = logging.getLogger(__name__)
+
 
 print("Ikaros, fly high!")
 
@@ -27,7 +31,6 @@ def main():
 
         prices.to_csv(file_name, index=False)
 
-
         # store in DB
         print("Storing result into DB...")
         repository.save_prices(prices_df=prices)
@@ -35,7 +38,48 @@ def main():
 
 
 
+
+def fetch_wig_history(start_date: str) -> pd.DataFrame:
+    frames = []
+    failed = []
+
+    for symbol in load_wig_symbols():
+        try:
+            df = fetch_eod_prices(
+                symbol=symbol,
+                start_date=start_date,
+            )
+            frames.append(df)
+        except Exception:
+            logger.exception("Failed to fetch %s", symbol)
+            failed.append(symbol)
+
+    result = (
+        pd.concat(frames, ignore_index=True)
+        if frames
+        else pd.DataFrame()
+    )
+
+    logger.info(
+        "WIG download finished: %d successful, %d failed",
+        len(frames),
+        len(failed),
+    )
+
+    if failed:
+        logger.warning("Failed symbols: %s", ", ".join(failed))
+
+    return result
+
+
+
 if __name__ == "__main__":
-    main()
+    #main()
+    repository = Repository()
 
+    prices = fetch_wig_history(start_date="2026-10-01")
 
+    # store in DB
+    print("Storing result into DB...")
+    repository.save_prices(prices_df=prices)
+    print("Done!")
