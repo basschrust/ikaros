@@ -1,0 +1,18 @@
+history:
+  start_date: "2020-01-01"
+
+instruments:
+  - symbol: AAPL
+    provider: yfinance
+    asset_type: equity
+    currency: USD
+
+  - symbol: MSFT
+    provider: yfinance
+    asset_type: equity
+    currency: USD
+
+  - symbol: PKN.WA
+    provider: yfinance
+    asset_type: equity
+    currency: PLN

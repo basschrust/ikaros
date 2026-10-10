@@ -1,0 +1,14 @@
+history:
+  start_date: "2020-01-01"
+
+universe:
+  name: WIG
+  source: money_pl
+  constituents_file: "data/wig_constituents.csv"
+
+defaults:
+  provider: yfinance
+  asset_type: equity
+  currency: PLN
+  suffix: ".WA"
+

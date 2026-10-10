@@ -1,0 +1,51 @@
+*.pyc
+*.txt
+*.pkl
+*.jpg
+*.png
+*.zip
+*.log
+
+# Python package related
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Weights & Biases
+wandb/
+
+# temporary files
+tmp/
+
+# output data
+data/
+output/
