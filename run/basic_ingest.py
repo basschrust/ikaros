@@ -8,6 +8,25 @@ from config.config import load_config
 
 logger = logging.getLogger(__name__)
 
+# helper functions
+
+
+from datetime import date, timedelta
+
+def dates_in_year(year: int) -> list[str]:
+    current = date(year=year, month=1, day=1)
+    end = date(year=year + 1, month=1, day=1)
+
+    dates = []
+    while current < end:
+        dates.append(current.isoformat())
+        current += timedelta(days=1)
+
+    return dates
+
+
+
+### more important functions
 
 print("Ikaros, fly high!")
 
@@ -39,7 +58,9 @@ def main():
 
 
 
-def fetch_wig_history(start_date: str) -> pd.DataFrame:
+def fetch_wig_history(start_date: str,
+                      end_date: str|None = None
+                      ) -> pd.DataFrame:
     frames = []
     failed = []
 
@@ -48,6 +69,7 @@ def fetch_wig_history(start_date: str) -> pd.DataFrame:
             df = fetch_eod_prices(
                 symbol=symbol,
                 start_date=start_date,
+                end_date=end_date,
             )
             frames.append(df)
         except Exception:
@@ -77,9 +99,16 @@ if __name__ == "__main__":
     #main()
     repository = Repository()
 
-    prices = fetch_wig_history(start_date="2026-10-01")
+    for day in ["2024-01-02", "2024-01-03"]:
+        #dates_in_year(2025):
+        print("Ingesting day ", day)
+        prices = fetch_wig_history(start_date=day,
+                          end_date=day)
+
+    # prices = fetch_wig_history(start_date="2026-09-30",
+    #                            end_date="2026-09-30")
 
     # store in DB
-    print("Storing result into DB...")
-    repository.save_prices(prices_df=prices)
-    print("Done!")
+        print("Storing result into DB...")
+        repository.save_prices(prices_df=prices)
+        print("Done!")

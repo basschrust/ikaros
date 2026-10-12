@@ -1,5 +1,6 @@
 import pandas as pd
 from openbb import obb
+from openbb_core.provider.utils.errors import EmptyDataError
 
 
 def fetch_eod_prices(*,
@@ -8,12 +9,16 @@ def fetch_eod_prices(*,
     provider: str = "yfinance",
     end_date: str | None = None,
 ) -> pd.DataFrame:
-    result = obb.yfinance.equity.price.historical(
-        symbol=symbol,
-        start_date=start_date,
-        end_date=end_date,
-        interval="1d",
-    )
+    try:
+        result = obb.yfinance.equity.price.historical(
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            interval="1d",
+        )
+    except EmptyDataError:
+        pass
+
 
     df = result.to_dataframe().reset_index()
     df.columns = [column.lower() for column in df.columns]

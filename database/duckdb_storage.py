@@ -22,7 +22,9 @@ class Repository:
                             name STRING,
                             reference_price DOUBLE,
                             symbol STRING,
-                            currency STRING
+                            currency STRING,
+                            calendar_id INTEGER,
+                            init_date TIMESTAMP,
                     )
                 """)
 
@@ -41,6 +43,43 @@ class Repository:
                     )
                 """)
 
+        # calendars
+        self.connection.execute("""
+                    CREATE TABLE IF NOT EXISTS calendars (
+                        calendar_id INTEGER,
+                        name STRING,
+                        days_per_year INTEGER default 365,
+                        init_date TIMESTAMP,
+                        working_days STRING,
+                        comment STRING
+                    )
+                """)
+
+        # dates for the calendar - trading_days
+        self.connection.execute("""
+                    CREATE TABLE IF NOT EXISTS trading_days (
+                        date TIMESTAMP,
+                        calendar_id INTEGER,
+                        comment STRING,
+                        load_status STRING,
+                        load_date TIMESTAMP,
+                    )
+                """)
+
+        self.connection.execute("""
+                    CREATE TABLE IF NOT EXISTS non_trading_days (
+                        date TIMESTAMP,
+                        calendar_id INTEGER,
+                        comment STRING
+                    )
+                """)
+
+
+
+#################################################################################################
+#####################################    saving      ############################################
+#################################################################################################
+
 
     def save_prices(self, prices_df: pd.DataFrame):
         self.connection.register("prices_df", prices_df)
@@ -52,3 +91,45 @@ class Repository:
                 """)
 
         self.connection.unregister("prices_df")
+
+
+    # calendar fill
+    def save_calendars(self, calendars_df: pd.DataFrame):
+        self.connection.register("calendars_df", calendars_df)
+        self.connection.execute("""
+                    INSERT INTO calendars (
+                                calendar_id, name, days_per_year, init_date, working_days, comment
+                    )
+                    SELECT calendar_id, name, days_per_year, init_date, working_days, comment
+                    FROM calendars_df
+                """)
+
+        self.connection.unregister("calendars_df")
+
+
+    def save_trading_days(self, trading_days_df: pd.DataFrame):
+        self.connection.register("trading_days_df", trading_days_df)
+        self.connection.execute("""
+                            INSERT INTO trading_days (date, calendar_id, comment, load_status, load_date)
+                            SELECT date, calendar_id, comment, load_status, load_date
+                            FROM trading_days_df
+                """)
+
+        self.connection.unregister("trading_days_df")
+
+
+    def save_non_trading_days(self, non_trading_days_df: pd.DataFrame):
+        self.connection.register("non_trading_days_df", non_trading_days_df)
+        self.connection.execute("""
+                            INSERT INTO non_trading_days (date, calendar_id, comment)
+                            SELECT date, calendar_id, comment
+                            FROM non_trading_days_df
+                """)
+
+        self.connection.unregister("non_trading_days_df")
+
+
+#################################################################################################
+##############################          retrieving           ####################################
+#################################################################################################
+
