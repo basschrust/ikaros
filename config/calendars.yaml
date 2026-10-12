@@ -1,11 +1,11 @@
 calendars:
-  - id: 0
+  - calendar_id: 0
     name: calendar_GPW
     comment: "Kalendarz GPW"
     days_per_year: 365
     #init_date: 1991-01-01 # later, yet just 2025 and so on
     init_date: 2025-01-01
-    working_days: [1,2,3,4,5]  # 6 Sat 7 Sun
+    working_days: "0,1,2,3,4"  # 0 Mon 4 Fri 5 Sat 6 Sun
     non_trading_days:
       - "2025-01-01"
       - "2025-01-06"

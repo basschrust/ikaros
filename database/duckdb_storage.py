@@ -81,18 +81,6 @@ class Repository:
 #################################################################################################
 
 
-    def save_prices(self, prices_df: pd.DataFrame):
-        self.connection.register("prices_df", prices_df)
-
-        self.connection.execute("""
-                    INSERT INTO prices (symbol, date, open, high, low, close, volume, dividend, split_ratio)
-                    SELECT symbol, date, open, high, low, close, volume, dividend, split_ratio
-                    FROM prices_df
-                """)
-
-        self.connection.unregister("prices_df")
-
-
     # calendar fill
     def save_calendars(self, calendars_df: pd.DataFrame):
         self.connection.register("calendars_df", calendars_df)
@@ -129,7 +117,51 @@ class Repository:
         self.connection.unregister("non_trading_days_df")
 
 
+    # securities fill
+    def save_securities(self, securities_df: pd.DataFrame):
+        self.connection.register("securities_df", securities_df)
+        self.connection.execute("""
+                            INSERT INTO securities (asset_id, instrument_class, market_type, name,
+                             symbol, currency, calendar_id, init_date)
+                            SELECT asset_id, instrument_class, market_type, name,
+                             symbol, currency, calendar_id, init_date
+                            FROM securities_df
+                """)
+
+        self.connection.unregister("securities_df")
+
+
+    # the ingest - prices & rates
+
+    def save_prices(self, prices_df: pd.DataFrame):
+        self.connection.register("prices_df", prices_df)
+
+        self.connection.execute("""
+                    INSERT INTO prices (symbol, date, open, high, low, close, volume, dividend, split_ratio)
+                    SELECT symbol, date, open, high, low, close, volume, dividend, split_ratio
+                    FROM prices_df
+                """)
+
+        self.connection.unregister("prices_df")
+
+
 #################################################################################################
 ##############################          retrieving           ####################################
 #################################################################################################
+
+    def get_calendar(self, calendar_id: int):
+        return self.connection.execute(query="""SELECT calendar_id, name, days_per_year, init_date, working_days, comment
+                            FROM calendars 
+                            WHERE calendar_id = ?
+                            """, parameters=[calendar_id]).fetchdf()
+
+    def get_trading_days(self, calendar_id: int, year: int):
+        begin = f"{year}-01-01"
+        end = f"{year}-12-31"
+        return self.connection.execute(query="""SELECT date, calendar_id, comment, load_status, load_date
+                            FROM trading_days 
+                            WHERE calendar_id = ? AND date between ? and ? 
+                            ORDER BY date""", parameters=[calendar_id, begin, end]).fetchdf()
+
+
 
