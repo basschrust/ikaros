@@ -41,5 +41,6 @@ def fetch_eod_prices(*,
 
     except EmptyDataError:
         print(f"No data for this symbol: {symbol}")
+        return pd.DataFrame()
 
 
