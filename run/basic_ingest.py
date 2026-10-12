@@ -2,7 +2,6 @@ import logging
 import pandas as pd
 
 from database.duckdb_storage import Repository
-from ingestion.universe import load_wig_symbols
 from ingestion.prices import fetch_eod_prices
 from config.config import load_config
 
@@ -41,15 +40,13 @@ def main():
         print("Done!")
 
 
-
-
 def fetch_wig_history(start_date: str,
                       end_date: str|None = None
                       ) -> pd.DataFrame:
     frames = []
     failed = []
 
-    for symbol in load_wig_symbols():
+    for symbol in []:
         try:
             df = fetch_eod_prices(
                 symbol=symbol,

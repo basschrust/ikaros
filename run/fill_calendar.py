@@ -1,7 +1,6 @@
 import sys
 import pandas as pd
 
-
 from database.duckdb_storage import Repository
 from config.config import load_config
 from utils.dateutils import working_days_in_year
