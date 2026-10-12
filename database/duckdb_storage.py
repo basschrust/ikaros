@@ -25,6 +25,7 @@ class Repository:
                             currency STRING,
                             calendar_id INTEGER,
                             init_date TIMESTAMP,
+                            venue STRING
                     )
                 """)
 
@@ -122,9 +123,9 @@ class Repository:
         self.connection.register("securities_df", securities_df)
         self.connection.execute("""
                             INSERT INTO securities (asset_id, instrument_class, market_type, name,
-                             symbol, currency, calendar_id, init_date)
+                             symbol, currency, calendar_id, init_date, venue)
                             SELECT asset_id, instrument_class, market_type, name,
-                             symbol, currency, calendar_id, init_date
+                             symbol, currency, calendar_id, init_date, venue
                             FROM securities_df
                 """)
 
@@ -162,6 +163,14 @@ class Repository:
                             FROM trading_days 
                             WHERE calendar_id = ? AND date between ? and ? 
                             ORDER BY date""", parameters=[calendar_id, begin, end]).fetchdf()
+
+    def get_securities(self, venue: str|None=None):
+        return self.connection.execute(query="""SELECT asset_id, instrument_class, market_type, name, symbol,
+                                    currency, calendar_id, init_date, venue
+                                    FROM securities
+                                    WHERE venue = ?
+                    """, parameters=[venue]).fetchdf()
+
 
 
 

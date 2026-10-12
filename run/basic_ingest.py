@@ -8,8 +8,6 @@ from config.config import load_config
 logger = logging.getLogger(__name__)
 
 
-
-
 ### more important functions
 
 print("Ikaros, fly high!")
@@ -22,22 +20,28 @@ def main():
     # get instruments to ingest
     config = load_config()
 
-    instruments = config.get("instruments", [])
+    instruments = repository.get_securities(venue="GPW")
+    # trading_days = repository.get_trading_days(calendar_id=0)
+    print(f"Loading {len(instruments)} instruments...")
 
-    for instr in instruments:
-        print("Ingesting instrument ", instr["symbol"])
+    for index, instr in instruments.iterrows():
+        print("Ingesting instrument ", instr["name"])
         prices = fetch_eod_prices(symbol=instr["symbol"],
-                                  start_date=config["history"]["start_date"],)
+                                  start_date=config["history"]["start_date"],
+                                  end_date=config["history"]["end_date"])
 
         # dump to a file at first
         file_name = f"output/{instr["symbol"]}.csv"
 
-        prices.to_csv(file_name, index=False)
+        if len(prices.index) > 0:
+            prices.to_csv(file_name, index=False)
 
-        # store in DB
-        print("Storing result into DB...")
-        repository.save_prices(prices_df=prices)
-        print("Done!")
+            # store in DB
+            print("Storing result into DB...")
+            repository.save_prices(prices_df=prices)
+            print("Done!")
+        else:
+            print("No result returned")
 
 
 def fetch_wig_history(start_date: str,
@@ -78,19 +82,21 @@ def fetch_wig_history(start_date: str,
 
 
 if __name__ == "__main__":
-    #main()
-    repository = Repository()
+    main()
 
-    for day in ["2024-01-02", "2024-01-03"]:
-        #dates_in_year(2025):
-        print("Ingesting day ", day)
-        prices = fetch_wig_history(start_date=day,
-                          end_date=day)
-
-    # prices = fetch_wig_history(start_date="2026-09-30",
-    #                            end_date="2026-09-30")
-
-    # store in DB
-        print("Storing result into DB...")
-        repository.save_prices(prices_df=prices)
-        print("Done!")
+    #
+    # repository = Repository()
+    #
+    # for day in ["2024-01-02", "2024-01-03"]:
+    #     #dates_in_year(2025):
+    #     print("Ingesting day ", day)
+    #     prices = fetch_wig_history(start_date=day,
+    #                       end_date=day)
+    #
+    # # prices = fetch_wig_history(start_date="2026-09-30",
+    # #                            end_date="2026-09-30")
+    #
+    # # store in DB
+    #     print("Storing result into DB...")
+    #     repository.save_prices(prices_df=prices)
+    #     print("Done!")

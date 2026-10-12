@@ -37,6 +37,7 @@ if __name__ == "__main__":
     wig_df["currency"]= "PLN"
     wig_df["calendar_id"]= 0
     wig_df["init_date"]= "2025-01-01"
+    wig_df["venue"] = "GPW"
 
     # print(wig_df)
     # securities_df = pd.DataFrame()
