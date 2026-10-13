@@ -31,7 +31,7 @@ def main():
                                   end_date=config["history"]["end_date"])
 
         # dump to a file at first
-        file_name = f"output/{instr["symbol"]}.csv"
+        file_name = f"output/{instr["symbol"]}_{config["history"]["start_date"][:4]}.csv"
 
         if len(prices.index) > 0:
             prices.to_csv(file_name, index=False)

@@ -75,7 +75,45 @@ class Repository:
                     )
                 """)
 
+        ### currencies
+        self.connection.execute("""
+                    CREATE TABLE IF NOT EXISTS currencies (
+                        currency_id INTEGER PRIMARY KEY,
+                        symbol STRING,
+                        calendar_id INTEGER,
+                        name STRING,
+                        comment STRING,
+                        code STRING NOT NULL,
+                        minor_unit INTEGER,
+                        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, 
+                    )
+                """)
 
+        self.connection.execute("""
+                    CREATE TABLE IF NOT EXISTS  currency_pairs (
+                        currency_pair_id INTEGER PRIMARY KEY,
+                        base_currency_id INTEGER NOT NULL,
+                        quote_currency_id INTEGER NOT NULL,
+                        symbol VARCHAR NOT NULL,
+                        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    
+                        CONSTRAINT fk_base_currency
+                            FOREIGN KEY (base_currency_id)
+                            REFERENCES currencies (currency_id),
+                    
+                        CONSTRAINT fk_quote_currency
+                            FOREIGN KEY (quote_currency_id)
+                            REFERENCES currencies (currency_id),
+                    
+                        CONSTRAINT uq_currency_pair
+                            UNIQUE (base_currency_id, quote_currency_id),
+                    
+                        CONSTRAINT chk_different_currencies
+                            CHECK (base_currency_id <> quote_currency_id)
+                    )
+                """)
 
 #################################################################################################
 #####################################    saving      ############################################

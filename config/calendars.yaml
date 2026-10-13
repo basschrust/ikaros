@@ -40,3 +40,12 @@ calendars:
       - "2027-12-24"
       - "2027-12-31"
 
+  - calendar_id: 1
+    name: default_calendar
+    comment: "Default calendar for any currency"
+    days_per_year: 365
+    #init_date: 1991-01-01 # later, yet just 2025 and so on
+    init_date: 1981-01-01
+    working_days: "0,1,2,3,4"
+
+

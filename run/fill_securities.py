@@ -39,9 +39,6 @@ if __name__ == "__main__":
     wig_df["init_date"]= "2025-01-01"
     wig_df["venue"] = "GPW"
 
-    # print(wig_df)
-    # securities_df = pd.DataFrame()
-
     repository.save_securities(securities_df=wig_df)
 
 
