@@ -8,36 +8,57 @@ from config.config import load_config
 from utils.id_generator import id_generator
 
 
-def load_wig_data(
-    csv_path: str | Path = "data/gpw_stocks.csv",
-) -> pd.DataFrame:
-    df = pd.read_csv(csv_path, dtype={"ticker": str, "name": str})
-
-    if "ticker" not in df.columns:
-        raise ValueError("Expected a 'ticker' column")
-
-    df["symbol"] = df["ticker"] + ".WA"
-
-    return df
-
-
 if __name__ == "__main__":
 
     print("Filling currencies...")
     repository = Repository()
 
-    ccy_config = load_config("curerncies.yaml")
-    currencies = []
+    ccy_config = load_config("currencies.yaml")
+    ccy_df = pd.DataFrame(ccy_config.get("currencies", []))
 
-    wig_df = load_wig_data()
-    wig_df["asset_id"] = [id_generator.next() for _ in range(len(wig_df))]
-    wig_df["instrument_class"] = "stock"
-    wig_df["market_type"] ="continuous"
-    wig_df["currency"]= "PLN"
-    wig_df["calendar_id"]= 0
-    wig_df["init_date"]= "2025-01-01"
-    wig_df["venue"] = "GPW"
+    ccy_df["currency_id"] = [id_generator.next() for _ in range(len(ccy_df))]
+    ccy_df["calendar_id"]= 1
+    ccy_df["symbol"] = None
+    ccy_df["comment"] = None
+    ccy_df["is_active"] = True
 
     repository.save_currencies(currencies_df=ccy_df)
+
+    # TODO: get ids for currencies to be able to match them for pairs
+
+    # currency pairs
+    ccy_pairs = ccy_config.get("currency_pairs", [])
+    ccy_pairs_df = pd.DataFrame(ccy_pairs)
+    ccy_pairs_df["currency_pair_id"] = [id_generator.next() for _ in range(len(ccy_pairs_df))]
+
+    ccy_pairs_fin = (
+        ccy_pairs_df
+        .merge(
+            ccy_df[["code", "currency_id"]].rename(
+                columns={"code": "base", "currency_id": "base_currency_id"}
+            ),
+            on="base",
+            how="left",
+            validate="many_to_one",
+        )
+        .merge(
+            ccy_df[["code", "currency_id"]].rename(
+                columns={"code": "quote", "currency_id": "quote_currency_id"}
+            ),
+            on="quote",
+            how="left",
+            validate="many_to_one",
+        )
+    )
+
+    print(ccy_pairs_fin)
+
+    ccy_pairs_fin["is_active"] = True
+
+    assert ccy_pairs_fin["base_currency_id"].notna().all()
+    assert ccy_pairs_fin["quote_currency_id"].notna().all()
+
+    repository.save_currency_pairs(currency_pairs_df=ccy_pairs_fin)
+
 
 

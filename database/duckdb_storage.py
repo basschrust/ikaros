@@ -161,13 +161,38 @@ class Repository:
         self.connection.register("securities_df", securities_df)
         self.connection.execute("""
                             INSERT INTO securities (asset_id, instrument_class, market_type, name,
-                             symbol, currency, calendar_id, init_date, venue)
+                                    symbol, currency, calendar_id, init_date, venue)
                             SELECT asset_id, instrument_class, market_type, name,
-                             symbol, currency, calendar_id, init_date, venue
+                                    symbol, currency, calendar_id, init_date, venue
                             FROM securities_df
                 """)
 
         self.connection.unregister("securities_df")
+
+
+    # fill currencies and pairs
+    def save_currencies(self, currencies_df: pd.DataFrame):
+        self.connection.register("currencies_df", currencies_df)
+        self.connection.execute("""
+                            INSERT INTO currencies (currency_id, symbol, calendar_id, name,
+                                            comment, code, minor_unit, is_active)
+                            SELECT currency_id, symbol, calendar_id, name,
+                                            comment, code, minor_unit, is_active
+                            FROM currencies_df
+                """)
+
+        self.connection.unregister("currencies_df")
+
+    def save_currency_pairs(self, currency_pairs_df: pd.DataFrame):
+        self.connection.register("currency_pairs_df", currency_pairs_df)
+        self.connection.execute("""
+                            INSERT INTO currency_pairs (currency_pair_id, base_currency_id,
+                                            quote_currency_id, symbol, is_active)
+                            SELECT currency_pair_id, base_currency_id, quote_currency_id, symbol, is_active
+                            FROM currency_pairs_df
+                """)
+
+        self.connection.unregister("currency_pairs_df")
 
 
     # the ingest - prices & rates
@@ -182,6 +207,8 @@ class Repository:
                 """)
 
         self.connection.unregister("prices_df")
+
+
 
 
 #################################################################################################
