@@ -91,7 +91,7 @@ class Repository:
                 """)
 
         self.connection.execute("""
-                    CREATE TABLE IF NOT EXISTS  currency_pairs (
+                    CREATE TABLE IF NOT EXISTS currency_pairs (
                         currency_pair_id INTEGER PRIMARY KEY,
                         base_currency_id INTEGER NOT NULL,
                         quote_currency_id INTEGER NOT NULL,
@@ -113,6 +113,21 @@ class Repository:
                         CONSTRAINT chk_different_currencies
                             CHECK (base_currency_id <> quote_currency_id)
                     )
+                """)
+
+        self.connection.execute("""
+                    CREATE TABLE IF NOT EXISTS fx_rates (
+                                currency_pair_id INTEGER,
+                                symboL STRING,
+                                date TIMESTAMP,
+                                open DOUBLE,
+                                high DOUBLE,
+                                low DOUBLE,
+                                close DOUBLE,
+                                volume DOUBLE,
+                                comment STRING,
+                                ingested_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP        
+                        )
                 """)
 
 #################################################################################################
@@ -208,7 +223,17 @@ class Repository:
 
         self.connection.unregister("prices_df")
 
+    def save_fx_rates(self, fx_rates_df: pd.DataFrame):
+        self.connection.register("fx_rates_df", fx_rates_df)
+        self.connection.execute("""
+                    INSERT INTO fx_rates (currency_pair_id, symbol,
+                                date, open, high, low, close, volume)
+                    SELECT currency_pair_id, symbol,
+                                date, open, high, low, close, volume
+                    FROM fx_rates_df
+                """)
 
+        self.connection.unregister("fx_rates_df")
 
 
 #################################################################################################
@@ -235,6 +260,16 @@ class Repository:
                                     FROM securities
                                     WHERE venue = ?
                     """, parameters=[venue]).fetchdf()
+
+    def get_currencies(self):
+        ValueError("Not implemented yet!")
+
+    def get_currency_pairs(self):
+        return self.connection.execute(query="""SELECT currency_pair_id, base_currency_id, quote_currency_id,
+                                            symbol, is_active, created_at
+                                    FROM currency_pairs
+                                    WHERE is_active = ?
+                    """, parameters=[True]).fetchdf()
 
 
 
