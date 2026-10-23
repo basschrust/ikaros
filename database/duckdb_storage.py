@@ -13,6 +13,37 @@ class Repository:
 
 
     def prepare_tables(self):
+        # calendars
+        self.connection.execute("""
+                           CREATE TABLE IF NOT EXISTS calendars (
+                               calendar_id INTEGER,
+                               name STRING,
+                               days_per_year INTEGER default 365,
+                               init_date TIMESTAMP,
+                               working_days STRING,
+                               comment STRING
+                           )
+                       """)
+
+        # dates for the calendar - trading_days
+        self.connection.execute("""
+                           CREATE TABLE IF NOT EXISTS trading_days (
+                               date TIMESTAMP,
+                               calendar_id INTEGER,
+                               comment STRING,
+                               load_status STRING,
+                               load_date TIMESTAMP,
+                           )
+                       """)
+
+        self.connection.execute("""
+                           CREATE TABLE IF NOT EXISTS non_trading_days (
+                               date TIMESTAMP,
+                               calendar_id INTEGER,
+                               comment STRING
+                           )
+                       """)
+
         # securities
         self.connection.execute("""
                     CREATE TABLE IF NOT EXISTS securities (
@@ -44,36 +75,6 @@ class Repository:
                     )
                 """)
 
-        # calendars
-        self.connection.execute("""
-                    CREATE TABLE IF NOT EXISTS calendars (
-                        calendar_id INTEGER,
-                        name STRING,
-                        days_per_year INTEGER default 365,
-                        init_date TIMESTAMP,
-                        working_days STRING,
-                        comment STRING
-                    )
-                """)
-
-        # dates for the calendar - trading_days
-        self.connection.execute("""
-                    CREATE TABLE IF NOT EXISTS trading_days (
-                        date TIMESTAMP,
-                        calendar_id INTEGER,
-                        comment STRING,
-                        load_status STRING,
-                        load_date TIMESTAMP,
-                    )
-                """)
-
-        self.connection.execute("""
-                    CREATE TABLE IF NOT EXISTS non_trading_days (
-                        date TIMESTAMP,
-                        calendar_id INTEGER,
-                        comment STRING
-                    )
-                """)
 
         ### currencies
         self.connection.execute("""
@@ -129,6 +130,9 @@ class Repository:
                                 ingested_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP        
                         )
                 """)
+
+        # futures
+
 
 #################################################################################################
 #####################################    saving      ############################################
