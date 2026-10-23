@@ -1,11 +1,23 @@
 database:
-  driver: duckdb  # Change to snowflake for cloud persistence.
+  driver: snowflake  # or duckdb
+
   duckdb:
     output_dir: output
+
   snowflake:
     database: DAEDALUS
-    schema: MARKET_DATA  # Shared across ingestion runs.
+    schema: MARKET_DATA
     warehouse: DAEDALUS_WH
-    authenticator: snowflake
-    # role: DATA_ENGINEER
-# Set SNOWFLAKE_ACCOUNT / SNOWFLAKE_USER / SNOWFLAKE_PASSWORD via environment.
+
+
+#database:
+#  driver: duckdb  # Change to snowflake for cloud persistence.
+#  duckdb:
+#    output_dir: output
+#  snowflake:
+#    database: DAEDALUS
+#    schema: MARKET_DATA  # Shared across ingestion runs.
+#    warehouse: DAEDALUS_WH
+#    authenticator: snowflake
+#    # role: DATA_ENGINEER
+## Set SNOWFLAKE_ACCOUNT / SNOWFLAKE_USER / SNOWFLAKE_PASSWORD via environment.
