@@ -13,6 +13,37 @@ class Repository:
 
 
     def prepare_tables(self):
+        # calendars
+        self.connection.execute("""
+                           CREATE TABLE IF NOT EXISTS calendars (
+                               calendar_id INTEGER,
+                               name STRING,
+                               days_per_year INTEGER default 365,
+                               init_date TIMESTAMP,
+                               working_days STRING,
+                               comment STRING
+                           )
+                       """)
+
+        # dates for the calendar - trading_days
+        self.connection.execute("""
+                           CREATE TABLE IF NOT EXISTS trading_days (
+                               date TIMESTAMP,
+                               calendar_id INTEGER,
+                               comment STRING,
+                               load_status STRING,
+                               load_date TIMESTAMP,
+                           )
+                       """)
+
+        self.connection.execute("""
+                           CREATE TABLE IF NOT EXISTS non_trading_days (
+                               date TIMESTAMP,
+                               calendar_id INTEGER,
+                               comment STRING
+                           )
+                       """)
+
         # securities
         self.connection.execute("""
                     CREATE TABLE IF NOT EXISTS securities (
@@ -22,7 +53,10 @@ class Repository:
                             name STRING,
                             reference_price DOUBLE,
                             symbol STRING,
-                            currency STRING
+                            currency STRING,
+                            calendar_id INTEGER,
+                            init_date TIMESTAMP,
+                            venue STRING
                     )
                 """)
 
@@ -42,6 +76,146 @@ class Repository:
                 """)
 
 
+        ### currencies
+        self.connection.execute("""
+                    CREATE TABLE IF NOT EXISTS currencies (
+                        currency_id INTEGER PRIMARY KEY,
+                        symbol STRING,
+                        calendar_id INTEGER,
+                        name STRING,
+                        comment STRING,
+                        code STRING NOT NULL,
+                        minor_unit INTEGER,
+                        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, 
+                    )
+                """)
+
+        self.connection.execute("""
+                    CREATE TABLE IF NOT EXISTS currency_pairs (
+                        currency_pair_id INTEGER PRIMARY KEY,
+                        base_currency_id INTEGER NOT NULL,
+                        quote_currency_id INTEGER NOT NULL,
+                        symbol VARCHAR NOT NULL,
+                        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    
+                        CONSTRAINT fk_base_currency
+                            FOREIGN KEY (base_currency_id)
+                            REFERENCES currencies (currency_id),
+                    
+                        CONSTRAINT fk_quote_currency
+                            FOREIGN KEY (quote_currency_id)
+                            REFERENCES currencies (currency_id),
+                    
+                        CONSTRAINT uq_currency_pair
+                            UNIQUE (base_currency_id, quote_currency_id),
+                    
+                        CONSTRAINT chk_different_currencies
+                            CHECK (base_currency_id <> quote_currency_id)
+                    )
+                """)
+
+        self.connection.execute("""
+                    CREATE TABLE IF NOT EXISTS fx_rates (
+                                currency_pair_id INTEGER,
+                                symboL STRING,
+                                date TIMESTAMP,
+                                open DOUBLE,
+                                high DOUBLE,
+                                low DOUBLE,
+                                close DOUBLE,
+                                volume DOUBLE,
+                                comment STRING,
+                                ingested_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP        
+                        )
+                """)
+
+        # futures
+
+
+#################################################################################################
+#####################################    saving      ############################################
+#################################################################################################
+
+
+    # calendar fill
+    def save_calendars(self, calendars_df: pd.DataFrame):
+        self.connection.register("calendars_df", calendars_df)
+        self.connection.execute("""
+                    INSERT INTO calendars (
+                                calendar_id, name, days_per_year, init_date, working_days, comment
+                    )
+                    SELECT calendar_id, name, days_per_year, init_date, working_days, comment
+                    FROM calendars_df
+                """)
+
+        self.connection.unregister("calendars_df")
+
+
+    def save_trading_days(self, trading_days_df: pd.DataFrame):
+        self.connection.register("trading_days_df", trading_days_df)
+        self.connection.execute("""
+                            INSERT INTO trading_days (date, calendar_id, comment, load_status, load_date)
+                            SELECT date, calendar_id, comment, load_status, load_date
+                            FROM trading_days_df
+                """)
+
+        self.connection.unregister("trading_days_df")
+
+
+    def save_non_trading_days(self, non_trading_days_df: pd.DataFrame):
+        self.connection.register("non_trading_days_df", non_trading_days_df)
+        self.connection.execute("""
+                            INSERT INTO non_trading_days (date, calendar_id, comment)
+                            SELECT date, calendar_id, comment
+                            FROM non_trading_days_df
+                """)
+
+        self.connection.unregister("non_trading_days_df")
+
+
+    # securities fill
+    def save_securities(self, securities_df: pd.DataFrame):
+        self.connection.register("securities_df", securities_df)
+        self.connection.execute("""
+                            INSERT INTO securities (asset_id, instrument_class, market_type, name,
+                                    symbol, currency, calendar_id, init_date, venue)
+                            SELECT asset_id, instrument_class, market_type, name,
+                                    symbol, currency, calendar_id, init_date, venue
+                            FROM securities_df
+                """)
+
+        self.connection.unregister("securities_df")
+
+
+    # fill currencies and pairs
+    def save_currencies(self, currencies_df: pd.DataFrame):
+        self.connection.register("currencies_df", currencies_df)
+        self.connection.execute("""
+                            INSERT INTO currencies (currency_id, symbol, calendar_id, name,
+                                            comment, code, minor_unit, is_active)
+                            SELECT currency_id, symbol, calendar_id, name,
+                                            comment, code, minor_unit, is_active
+                            FROM currencies_df
+                """)
+
+        self.connection.unregister("currencies_df")
+
+    def save_currency_pairs(self, currency_pairs_df: pd.DataFrame):
+        self.connection.register("currency_pairs_df", currency_pairs_df)
+        self.connection.execute("""
+                            INSERT INTO currency_pairs (currency_pair_id, base_currency_id,
+                                            quote_currency_id, symbol, is_active)
+                            SELECT currency_pair_id, base_currency_id, quote_currency_id, symbol, is_active
+                            FROM currency_pairs_df
+                """)
+
+        self.connection.unregister("currency_pairs_df")
+
+
+    # the ingest - prices & rates
+
     def save_prices(self, prices_df: pd.DataFrame):
         self.connection.register("prices_df", prices_df)
 
@@ -52,3 +226,55 @@ class Repository:
                 """)
 
         self.connection.unregister("prices_df")
+
+    def save_fx_rates(self, fx_rates_df: pd.DataFrame):
+        self.connection.register("fx_rates_df", fx_rates_df)
+        self.connection.execute("""
+                    INSERT INTO fx_rates (currency_pair_id, symbol,
+                                date, open, high, low, close, volume)
+                    SELECT currency_pair_id, symbol,
+                                date, open, high, low, close, volume
+                    FROM fx_rates_df
+                """)
+
+        self.connection.unregister("fx_rates_df")
+
+
+#################################################################################################
+##############################          retrieving           ####################################
+#################################################################################################
+
+    def get_calendar(self, calendar_id: int):
+        return self.connection.execute(query="""SELECT calendar_id, name, days_per_year, init_date, working_days, comment
+                            FROM calendars 
+                            WHERE calendar_id = ?
+                            """, parameters=[calendar_id]).fetchdf()
+
+    def get_trading_days(self, calendar_id: int, year: int):
+        begin = f"{year}-01-01"
+        end = f"{year}-12-31"
+        return self.connection.execute(query="""SELECT date, calendar_id, comment, load_status, load_date
+                            FROM trading_days 
+                            WHERE calendar_id = ? AND date between ? and ? 
+                            ORDER BY date""", parameters=[calendar_id, begin, end]).fetchdf()
+
+    def get_securities(self, venue: str|None=None):
+        return self.connection.execute(query="""SELECT asset_id, instrument_class, market_type, name, symbol,
+                                    currency, calendar_id, init_date, venue
+                                    FROM securities
+                                    WHERE venue = ?
+                    """, parameters=[venue]).fetchdf()
+
+    def get_currencies(self):
+        ValueError("Not implemented yet!")
+
+    def get_currency_pairs(self):
+        return self.connection.execute(query="""SELECT currency_pair_id, base_currency_id, quote_currency_id,
+                                            symbol, is_active, created_at
+                                    FROM currency_pairs
+                                    WHERE is_active = ?
+                    """, parameters=[True]).fetchdf()
+
+
+
+
