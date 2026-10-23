@@ -139,7 +139,38 @@ class SnowflakeRepository:
         self._insert_frame("prices", prices_df)
 
     def save_fx_rates(self, fx_rates_df: pd.DataFrame) -> None:
-        self._insert_frame("fx_rates", fx_rates_df)
+        """Write daily FX dates through explicit Snowflake text-to-timestamp conversion.
+
+        Avoid Parquet/Pandas timestamp inference used by write_pandas for FX dates.
+        This remains append-only; existing malformed rows are not altered.
+        """
+        if fx_rates_df.empty:
+            return
+        fields = WRITE_COLUMNS["fx_rates"]
+        absent = set(fields) - set(fx_rates_df.columns)
+        if absent:
+            raise ValueError(f"fx_rates: missing columns {sorted(absent)}")
+
+        prepared = fx_rates_df[fields].copy()
+        dates = pd.to_datetime(prepared["date"], errors="raise")
+        if dates.isna().any():
+            raise ValueError("fx_rates: date cannot be null")
+        prepared["date"] = dates.dt.strftime("%Y-%m-%d")
+        prepared = prepared.astype(object).where(pd.notna(prepared), None)
+        rows = list(prepared.itertuples(index=False, name=None))
+        sql = (
+            'INSERT INTO "FX_RATES" '
+            '("CURRENCY_PAIR_ID", "SYMBOL", "DATE", "OPEN", "HIGH", "LOW", "CLOSE", "VOLUME") '
+            "VALUES (%s, %s, TO_TIMESTAMP_NTZ(%s, 'YYYY-MM-DD'), %s, %s, %s, %s, %s)"
+        )
+        with self.connection.cursor() as cur:
+            try:
+                cur.execute("BEGIN")
+                cur.executemany(sql, rows)
+                cur.execute("COMMIT")
+            except Exception:
+                cur.execute("ROLLBACK")
+                raise
 
     def get_calendar(self, calendar_id: int) -> pd.DataFrame:
         return self._query('SELECT * FROM "CALENDARS" WHERE "CALENDAR_ID" = %s', (calendar_id,))
