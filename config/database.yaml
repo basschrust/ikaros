@@ -1,13 +1,22 @@
 database:
-  driver: snowflake  # or duckdb
-
-  duckdb:
-    output_dir: output
-
+  driver: snowflake
   snowflake:
     database: DAEDALUS
     schema: MARKET_DATA
     warehouse: DAEDALUS_WH
+    authenticator: snowflake
+
+
+#database:
+#  driver: snowflake  # or duckdb
+#
+#  duckdb:
+#    output_dir: output
+#
+#  snowflake:
+#    database: DAEDALUS
+#    schema: MARKET_DATA
+#    warehouse: DAEDALUS_WH
 
 
 #database:

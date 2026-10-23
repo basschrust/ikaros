@@ -1,16 +1,31 @@
-# Ikaros Snowflake schema smoke test
+# Ikaros: basic FX → Snowflake smoke test
 
-Copy `run/check_snowflake_tables.py` into the Ikaros `run/` directory.
+Copy `run/smoke_fx_snowflake.py` to `run/` in your local Ikaros project.
+It uses your previously prepared `database/snowflake_storage.py`, `database/repositories/factory.py`, `config/database.yaml` and current `run/ingest_fx_rates.py`.
 
-This script expects the earlier database-backends overlay to be installed (`database/snowflake_storage.py`, `database/repositories/factory.py`, and `config/database.yaml`).
+1. Install/sync environment: `uv sync --extra snowflake --extra dev` (adjust extras if your local `pyproject.toml` uses different names).
+2. Set `database.driver: snowflake` in `config/database.yaml`.
+3. Configure `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PASSWORD` as environment variables (not in Git). Use a role with USAGE on database/warehouse and CREATE SCHEMA or schema USAGE plus CREATE TABLE privileges.
+4. Ensure Snowflake tables `CURRENCIES` and `CURRENCY_PAIRS` have been seeded. The runner resolves `currency_pair_id` from `CURRENCY_PAIRS` and *will not* create arbitrary IDs.
+5. From project root run:
 
-1. Set `database.driver: snowflake` in `config/database.yaml`.
-2. Install `python -m pip install -r requirements-snowflake.txt`.
-3. Set environment variables `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PASSWORD` (or configure your preferred authenticator in the connector).
-4. From repository root run `python -m run.check_snowflake_tables`.
+```powershell
+uv run python -m run.smoke_fx_snowflake --symbol 'EURPLN=X' --start 2026-10-19 --end 2026-10-22
+uv run python -m run.smoke_fx_snowflake --symbol 'EURPLN=X' --start 2026-10-19 --end 2026-10-22 --write
+```
 
-The repository constructor issues `CREATE SCHEMA IF NOT EXISTS` and eight `CREATE TABLE IF NOT EXISTS` commands in the configured database/schema, then the script checks table names. Running it twice should be harmless; it will not truncate or drop tables and does not insert data. It *does* create persistent schema objects if missing. Do not use production schema names until you approve those names and access policies.
+The first command is dry-run. The second inserts only dates absent at the time of the preflight read and verifies those dates afterward. It is **not concurrency-safe or truly idempotent**: parallel runs can race. The current repository's `save_fx_rates` is append-only. Do not run concurrent writers yet. The next stage should use Snowflake `MERGE` keyed by `(currency_pair_id, date)`.
 
-The Snowflake role needs USAGE on database, CREATE SCHEMA on database if the schema does not exist, USAGE on schema and CREATE TABLE on schema. If a role has ownership or equivalent grants these may already be covered. The warehouse is configured for the connection; a CREATE TABLE DDL check does not need a costly bulk ingest.
+If no currency pairs are configured in Snowflake, seed `CURRENCIES` / `CURRENCY_PAIRS` first using `run/fill_currencies.py` after switching it to `repository_from_config(load_config('database.yaml'))`. That loader uses the currency configuration and generates IDs; run only once until idempotent reference-data upserts are implemented. Avoid accidentally seeding an existing table twice.
 
-This is an integration smoke test, not a local mock; the assistant cannot execute it against your Snowflake instance without an authorized connection.
+Verify directly in Snowsight:
+
+```sql
+SELECT SYMBOL, CURRENCY_PAIR_ID, DATE, CLOSE, INGESTED_AT
+FROM DAEDALUS.MARKET_DATA.FX_RATES
+WHERE SYMBOL = 'EURPLN=X'
+ORDER BY DATE DESC
+LIMIT 20;
+```
+
+**Note:** The public GitHub `master` snapshot inspected on 2026-10-23 does not yet expose the connector files. This package assumes your locally copied connector bundle is present. No GitHub files were changed or any Snowflake connection attempted here.
