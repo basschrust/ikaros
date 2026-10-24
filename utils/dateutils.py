@@ -3,8 +3,6 @@
 from datetime import date, timedelta
 
 
-
-
 def dates_in_year(year: int) -> list[str]:
     current = date(year=year, month=1, day=1)
     end = date(year=year + 1, month=1, day=1)
@@ -23,7 +21,7 @@ def working_days_in_year(year: int) -> list[str]:
 
     dates = []
     while current < end:
-        if current.weekday() < 5: # 0 Mon, 6 Sun
+        if current.weekday() < 5:  # 0 Mon, 6 Sun
             dates.append(current.isoformat())
         current += timedelta(days=1)
 

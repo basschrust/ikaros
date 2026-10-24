@@ -3,7 +3,8 @@ from openbb import obb
 from openbb_core.provider.utils.errors import EmptyDataError
 
 
-def fetch_eod_futures_prices(*,
+def fetch_eod_futures_prices(
+    *,
     symbol: str,
     start_date: str,
     provider: str = "yfinance",
@@ -35,12 +36,24 @@ def fetch_eod_futures_prices(*,
         df["date"] = pd.to_datetime(df["date"]).dt.date
         df["volume"] = pd.to_numeric(df["volume"], errors="coerce").astype("Int64")
 
-        return df[
-            ["symbol", "date", "open", "high", "low", "close", "volume", "dividend", "split_ratio"]
-        ].sort_values("date").reset_index(drop=True)
+        return (
+            df[
+                [
+                    "symbol",
+                    "date",
+                    "open",
+                    "high",
+                    "low",
+                    "close",
+                    "volume",
+                    "dividend",
+                    "split_ratio",
+                ]
+            ]
+            .sort_values("date")
+            .reset_index(drop=True)
+        )
 
     except EmptyDataError:
         print(f"No data for this symbol: {symbol}")
         return pd.DataFrame()
-
-

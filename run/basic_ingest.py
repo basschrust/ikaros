@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 print("Ikaros, fly high!")
 
+
 def main():
     print("Starting the Ikaros ingest...")
     print("Preparing DB...")
@@ -26,12 +27,14 @@ def main():
 
     for index, instr in instruments.iterrows():
         print("Ingesting instrument ", instr["name"])
-        prices = fetch_eod_prices(symbol=instr["symbol"],
-                                  start_date=config["history"]["start_date"],
-                                  end_date=config["history"]["end_date"])
+        prices = fetch_eod_prices(
+            symbol=instr["symbol"],
+            start_date=config["history"]["start_date"],
+            end_date=config["history"]["end_date"],
+        )
 
         # dump to a file at first
-        file_name = f"output/{instr["symbol"]}_{config["history"]["start_date"][:4]}.csv"
+        file_name = f"output/{instr['symbol']}_{config['history']['start_date'][:4]}.csv"
 
         if len(prices.index) > 0:
             prices.to_csv(file_name, index=False)
@@ -44,9 +47,7 @@ def main():
             print("No result returned")
 
 
-def fetch_wig_history(start_date: str,
-                      end_date: str|None = None
-                      ) -> pd.DataFrame:
+def fetch_wig_history(start_date: str, end_date: str | None = None) -> pd.DataFrame:
     frames = []
     failed = []
 
@@ -62,11 +63,7 @@ def fetch_wig_history(start_date: str,
             logger.exception("Failed to fetch %s", symbol)
             failed.append(symbol)
 
-    result = (
-        pd.concat(frames, ignore_index=True)
-        if frames
-        else pd.DataFrame()
-    )
+    result = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
     logger.info(
         "WIG download finished: %d successful, %d failed",
@@ -78,7 +75,6 @@ def fetch_wig_history(start_date: str,
         logger.warning("Failed symbols: %s", ", ".join(failed))
 
     return result
-
 
 
 if __name__ == "__main__":

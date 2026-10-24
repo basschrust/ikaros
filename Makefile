@@ -1,9 +1,23 @@
-.PHONY: test test-verbose
 
-PYTHON ?= python
+.PHONY: test test-verbose lint lint-check check
+
+UV ?= uv
 
 test:
-	$(PYTHON) -m pytest -q tests
+	$(UV) run --no-sync python -m pytest -q tests
 
 test-verbose:
-	$(PYTHON) -m pytest -v tests
+	$(UV) run --no-sync python -m pytest -v tests
+
+lint-check:
+	$(UV) run --no-sync ruff check .
+	$(UV) run --no-sync ruff format --check .
+
+lint:
+	$(UV) run --no-sync ruff check --fix .
+	$(UV) run --no-sync ruff format .
+
+check: lint-check test
+
+format:
+	$(UV) run --no-sync ruff format .
