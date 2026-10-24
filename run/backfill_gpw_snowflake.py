@@ -17,6 +17,7 @@ from config.config import load_config
 from database.repositories.factory import repository_from_config
 from ingestion.gpw_backfill import missing_observations, normalize_prices, year_windows
 from ingestion.prices import fetch_eod_prices
+from ingestion.iic import BatchKey, SnowflakeIIC, Status
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,9 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=None, help="Process only the first N registered securities")
     parser.add_argument("--write", action="store_true", help="Persist missing observations")
     parser.add_argument("--continue-on-error", action="store_true")
+    parser.add_argument("--iic-force", action="store_true", help="Recheck successful batches")
+    parser.add_argument("--iic-retry-no-data", action="store_true")
+    parser.add_argument("--iic-lease-minutes", type=int, default=90)
     args = parser.parse_args()
     if args.limit is not None and args.limit < 1:
         parser.error("--limit must be positive")
@@ -115,20 +119,37 @@ def main() -> None:
     attempted = 0
     missing_count = 0
     with repository_from_config(config) as repo:
+        iic = SnowflakeIIC(repo.connection) if args.write else None
+        if iic:
+            iic.prepare()
         symbols = registered_symbols(repo.connection, args.symbols, args.limit)
         logger.info("GPW securities: %d, yearly periods: %d, write=%s", len(symbols), len(windows), args.write)
         for symbol in symbols:
             for begin, end in windows:
+                key = BatchKey("GPW", symbol, "yfinance", begin, end)
+                if iic:
+                    allowed, reason = iic.start(
+                        key, force=args.iic_force, retry_no_data=args.iic_retry_no_data,
+                        lease_minutes=args.iic_lease_minutes,
+                    )
+                    if not allowed:
+                        logger.info("SKIP %s %s..%s: %s", symbol, begin, end, reason)
+                        continue
+                fetched_count = 0
+                candidate_count = 0
                 try:
                     fetched = fetch_eod_prices(symbol=symbol, start_date=begin.isoformat(), end_date=(end + timedelta(days=1)).isoformat())
                     if fetched.empty:
                         logger.warning("NO_DATA %s %s..%s", symbol, begin, end)
+                        if iic:
+                            iic.finish(key, Status.NO_DATA)
                         continue
                     clean = normalize_prices(fetched, symbol, begin, end)
                     existing = existing_dates(repo.connection, symbol, begin, end)
                     missing = missing_observations(clean, existing)
                     attempted += len(clean)
                     missing_count += len(missing)
+                    fetched_count, candidate_count = len(clean), len(missing)
                     logger.info("%s %s..%s fetched=%d existing=%d missing=%d", symbol, begin, end,
                                 len(clean), len(clean)-len(missing), len(missing))
                     if args.write and not missing.empty:
@@ -137,7 +158,15 @@ def main() -> None:
                         gaps = set(missing["date"]) - verified
                         if gaps:
                             raise RuntimeError(f"Readback dates missing for {symbol}: {sorted(gaps)[:10]}")
-                except Exception:
+                    if iic:
+                        iic.finish(key, Status.SUCCESS, fetched=fetched_count, candidate=candidate_count)
+                except Exception as exc:
+                    if iic:
+                        try:
+                            iic.finish(key, Status.FAILED, fetched=fetched_count,
+                                       candidate=candidate_count, error=str(exc))
+                        except Exception:
+                            logger.exception("Unable to record IIC failure for %s", symbol)
                     logger.exception("FAILED %s %s..%s", symbol, begin, end)
                     failed.append((symbol, begin, end))
                     if not args.continue_on_error:
