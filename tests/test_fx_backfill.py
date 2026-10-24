@@ -20,14 +20,34 @@ def test_invalid_window():
 
 
 def test_normalize_deduplicates_and_serializes_dates():
-    frame = pd.DataFrame([
-        {"date": "2024-01-02", "open": 4.1, "high": 4.3, "low": 4.0,
-         "close": 4.2, "volume": None},
-        {"date": "2024-01-02", "open": 4.1, "high": 4.3, "low": 4.0,
-         "close": 4.25, "volume": None},
-        {"date": "2024-01-03", "open": 4.2, "high": 4.4, "low": 4.1,
-         "close": 4.3, "volume": 100},
-    ])
+    frame = pd.DataFrame(
+        [
+            {
+                "date": "2024-01-02",
+                "open": 4.1,
+                "high": 4.3,
+                "low": 4.0,
+                "close": 4.2,
+                "volume": None,
+            },
+            {
+                "date": "2024-01-02",
+                "open": 4.1,
+                "high": 4.3,
+                "low": 4.0,
+                "close": 4.25,
+                "volume": None,
+            },
+            {
+                "date": "2024-01-03",
+                "open": 4.2,
+                "high": 4.4,
+                "low": 4.1,
+                "close": 4.3,
+                "volume": 100,
+            },
+        ]
+    )
     rows = normalize_batch(frame, 1, "EURPLN=X", date(2024, 1, 1), date(2024, 12, 31))
     assert len(rows) == 2
     assert rows[0] == (1, "EURPLN=X", "2024-01-02", 4.1, 4.3, 4.0, 4.25, None)
@@ -35,5 +55,6 @@ def test_normalize_deduplicates_and_serializes_dates():
 
 
 def test_empty_batch():
-    assert normalize_batch(pd.DataFrame(), 1, "EURPLN=X",
-                           date(2024, 1, 1), date(2024, 12, 31)) == []
+    assert (
+        normalize_batch(pd.DataFrame(), 1, "EURPLN=X", date(2024, 1, 1), date(2024, 12, 31)) == []
+    )

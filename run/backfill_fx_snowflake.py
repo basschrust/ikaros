@@ -2,6 +2,7 @@
 
 Run from Ikaros project root. By default this is a read-only dry run.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -11,6 +12,7 @@ from datetime import date, timedelta
 from typing import Iterator
 
 import pandas as pd
+from openbb_core.provider.utils.errors import EmptyDataError
 
 from config.config import load_config
 from database.repositories.factory import repository_from_config
@@ -48,6 +50,8 @@ INSERT INTO IKAROS_FX_BACKFILL_STAGE
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
 """
 
+logger = logging.getLogger(__name__)
+
 
 def year_windows(start: date, end: date) -> Iterator[tuple[date, date]]:
     """Yield consecutive inclusive calendar-year windows."""
@@ -60,8 +64,9 @@ def year_windows(start: date, end: date) -> Iterator[tuple[date, date]]:
         current = chunk_end + timedelta(days=1)
 
 
-def normalize_batch(frame: pd.DataFrame, pair_id: int, symbol: str,
-                    start: date, end: date) -> list[tuple]:
+def normalize_batch(
+    frame: pd.DataFrame, pair_id: int, symbol: str, start: date, end: date
+) -> list[tuple]:
     """Validate observations, normalize dates, discard duplicated response dates."""
     if frame.empty:
         return []
@@ -79,18 +84,32 @@ def normalize_batch(frame: pd.DataFrame, pair_id: int, symbol: str,
         raise ValueError(f"{symbol}: NULL OHLC detected; aborting batch")
     rows = []
     for row in batch.itertuples(index=False):
+
         def number(value):
             return None if pd.isna(value) else float(value)
-        rows.append((pair_id, symbol, row.date.isoformat(),
-                     number(row.open), number(row.high), number(row.low),
-                     number(row.close), number(row.volume)))
+
+        rows.append(
+            (
+                pair_id,
+                symbol,
+                row.date.isoformat(),
+                number(row.open),
+                number(row.high),
+                number(row.low),
+                number(row.close),
+                number(row.volume),
+            )
+        )
     return rows
 
 
 def existing_pair_id(connection, symbol: str) -> int:
     with connection.cursor() as cur:
-        cur.execute('SELECT "CURRENCY_PAIR_ID" FROM "CURRENCY_PAIRS" '
-                    'WHERE "SYMBOL" = %s AND "IS_ACTIVE" = TRUE', (symbol,))
+        cur.execute(
+            'SELECT "CURRENCY_PAIR_ID" FROM "CURRENCY_PAIRS" '
+            'WHERE "SYMBOL" = %s AND "IS_ACTIVE" = TRUE',
+            (symbol,),
+        )
         rows = cur.fetchall()
     if len(rows) != 1:
         raise ValueError(
@@ -102,11 +121,13 @@ def existing_pair_id(connection, symbol: str) -> int:
 
 def persisted_dates(connection, pair_id: int, begin: date, end: date) -> set[str]:
     with connection.cursor() as cur:
-        cur.execute('SELECT TO_CHAR("DATE", \'YYYY-MM-DD\') FROM "FX_RATES" '
-                    'WHERE "CURRENCY_PAIR_ID" = %s '
-                    'AND "DATE" >= TO_TIMESTAMP_NTZ(%s, \'YYYY-MM-DD\') '
-                    'AND "DATE" < DATEADD(day, 1, TO_TIMESTAMP_NTZ(%s, \'YYYY-MM-DD\'))',
-                    (pair_id, begin.isoformat(), end.isoformat()))
+        cur.execute(
+            'SELECT TO_CHAR("DATE", \'YYYY-MM-DD\') FROM "FX_RATES" '
+            'WHERE "CURRENCY_PAIR_ID" = %s '
+            "AND \"DATE\" >= TO_TIMESTAMP_NTZ(%s, 'YYYY-MM-DD') "
+            "AND \"DATE\" < DATEADD(day, 1, TO_TIMESTAMP_NTZ(%s, 'YYYY-MM-DD'))",
+            (pair_id, begin.isoformat(), end.isoformat()),
+        )
         return {str(row[0]) for row in cur.fetchall()}
 
 
@@ -131,14 +152,21 @@ def merge_batch(connection, rows: list[tuple]) -> int:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--symbols", nargs="+", default=["EURPLN=X"],
-                   help="Symbols configured in Snowflake CURRENCY_PAIRS")
+    p.add_argument(
+        "--symbols",
+        nargs="+",
+        default=["EURPLN=X"],
+        help="Symbols configured in Snowflake CURRENCY_PAIRS",
+    )
     p.add_argument("--start", type=date.fromisoformat, default=date(2020, 1, 1))
     p.add_argument("--end", type=date.fromisoformat, default=date(2025, 12, 31))
     p.add_argument("--write", action="store_true", help="Perform MERGE (default: dry run)")
     p.add_argument("--delay", type=float, default=0.5, help="Seconds between API requests")
-    p.add_argument("--continue-on-error", action="store_true",
-                   help="Continue other symbol/year batches when one fails")
+    p.add_argument(
+        "--continue-on-error",
+        action="store_true",
+        help="Continue other symbol/year batches when one fails",
+    )
     args = p.parse_args()
     if not args.symbols or args.delay < 0:
         p.error("Provide at least one symbol and nonnegative delay")
@@ -163,20 +191,50 @@ def main() -> None:
                 label = f"{symbol} {begin}..{end}"
                 try:
                     # Fetch first; compare existing valid dates before writing.
-                    df = fetch_fx_history(symbol, begin.isoformat(), end.isoformat())
+                    try:
+                        df = fetch_fx_history(
+                            symbol,
+                            begin.isoformat(),
+                            end.isoformat(),
+                        )
+                    except EmptyDataError:
+                        logger.warning(
+                            "NO_DATA %s %s..%s: provider returned no observations",
+                            symbol,
+                            begin,
+                            end,
+                        )
+                        continue
+                    except Exception:
+                        logger.exception(
+                            "FAILED %s %s..%s",
+                            symbol,
+                            begin,
+                            end,
+                        )
+                        failed_batches.append((symbol, begin, end))
+                        if not args.continue_on_error:
+                            raise
+                        continue
                     rows = normalize_batch(df, pair_id, symbol, begin, end)
                     existing = persisted_dates(repo.connection, pair_id, begin, end)
                     missing_rows = [row for row in rows if row[2] not in existing]
-                    LOGGER.info("%s: fetched=%d existing=%d new=%d",
-                                label, len(rows), len(existing), len(missing_rows))
+                    LOGGER.info(
+                        "%s: fetched=%d existing=%d new=%d",
+                        label,
+                        len(rows),
+                        len(existing),
+                        len(missing_rows),
+                    )
                     if args.write and missing_rows:
                         inserted = merge_batch(repo.connection, missing_rows)
                         confirmed = persisted_dates(repo.connection, pair_id, begin, end)
                         missing = {r[2] for r in missing_rows} - confirmed
                         if missing:
                             raise RuntimeError(f"Readback missing dates: {sorted(missing)}")
-                        LOGGER.info("%s: inserted=%d verified=%d", label,
-                                    inserted, len(missing_rows))
+                        LOGGER.info(
+                            "%s: inserted=%d verified=%d", label, inserted, len(missing_rows)
+                        )
                         total_inserted += inserted
                 except Exception:
                     LOGGER.exception("FAILED %s", label)
@@ -186,8 +244,12 @@ def main() -> None:
                 finally:
                     if args.delay:
                         time.sleep(args.delay)
-    LOGGER.info("Finished: inserted=%d failed_batches=%d dry_run=%s",
-                total_inserted, len(failures), not args.write)
+    LOGGER.info(
+        "Finished: inserted=%d failed_batches=%d dry_run=%s",
+        total_inserted,
+        len(failures),
+        not args.write,
+    )
     if failures:
         raise SystemExit("Failed batches: " + "; ".join(failures))
 

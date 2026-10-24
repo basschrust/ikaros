@@ -4,15 +4,18 @@ from run.seed_fx_reference import select_reference
 
 @pytest.fixture
 def cfg():
-    return {"currencies": [
-        {"code": "EUR", "name": "Euro"},
-        {"code": "USD", "name": "US Dollar"},
-        {"code": "PLN", "name": "Polish Zloty"},
-    ], "currency_pairs": [
-        {"base": "EUR", "quote": "PLN", "symbol": "EURPLN=X"},
-        {"base": "USD", "quote": "PLN", "symbol": "USDPLN=X"},
-        {"base": "EUR", "quote": "USD", "symbol": "EURUSD=X"},
-    ]}
+    return {
+        "currencies": [
+            {"code": "EUR", "name": "Euro"},
+            {"code": "USD", "name": "US Dollar"},
+            {"code": "PLN", "name": "Polish Zloty"},
+        ],
+        "currency_pairs": [
+            {"base": "EUR", "quote": "PLN", "symbol": "EURPLN=X"},
+            {"base": "USD", "quote": "PLN", "symbol": "USDPLN=X"},
+            {"base": "EUR", "quote": "USD", "symbol": "EURUSD=X"},
+        ],
+    }
 
 
 def test_select_multiple_pairs(cfg):

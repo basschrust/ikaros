@@ -1,7 +1,6 @@
 history:
-  start_date: "1991-01-01"
-  end_date: "1995-12-31"
-
+  start_date: '1991-01-01'
+  end_date: '1995-12-31'
 currencies:
 - code: PLN
   name: Polish Zloty
@@ -24,175 +23,217 @@ currencies:
 - code: CHF
   name: Swiss Franc
   minor_unit: 2
-
-
-# the pairs
-
+- code: CAD
+  name: Canadian Dollar
+  minor_unit: 2
+- code: AUD
+  name: Australian Dollar
+  minor_unit: 2
+- code: NZD
+  name: New Zealand Dollar
+  minor_unit: 2
+- code: SEK
+  name: Swedish Krona
+  minor_unit: 2
+- code: NOK
+  name: Norwegian Krone
+  minor_unit: 2
+- code: DKK
+  name: Danish Krone
+  minor_unit: 2
+- code: CNY
+  name: Chinese Yuan
+  minor_unit: 2
+- code: SGD
+  name: Singapore Dollar
+  minor_unit: 2
 currency_pairs:
 - base: PLN
   quote: EUR
   symbol: PLNEUR=X
-
 - base: EUR
   quote: PLN
   symbol: EURPLN=X
-
 - base: PLN
   quote: USD
   symbol: PLNUSD=X
-
 - base: USD
   quote: PLN
   symbol: USDPLN=X
-
 - base: PLN
   quote: GBP
   symbol: PLNGBP=X
-
 - base: GBP
   quote: PLN
   symbol: GBPPLN=X
-
 - base: PLN
   quote: CZK
   symbol: PLNCZK=X
-
 - base: CZK
   quote: PLN
   symbol: CZKPLN=X
-
 - base: PLN
   quote: JPY
   symbol: PLNJPY=X
-
 - base: JPY
   quote: PLN
   symbol: JPYPLN=X
-
 - base: PLN
   quote: CHF
   symbol: PLNCHF=X
-
 - base: CHF
   quote: PLN
   symbol: CHFPLN=X
-
 - base: EUR
   quote: USD
   symbol: EURUSD=X
-
 - base: USD
   quote: EUR
   symbol: USDEUR=X
-
 - base: EUR
   quote: GBP
   symbol: EURGBP=X
-
 - base: GBP
   quote: EUR
   symbol: GBPEUR=X
-
 - base: EUR
   quote: CZK
   symbol: EURCZK=X
-
 - base: CZK
   quote: EUR
   symbol: CZKEUR=X
-
 - base: EUR
   quote: JPY
   symbol: EURJPY=X
-
 - base: JPY
   quote: EUR
   symbol: JPYEUR=X
-
 - base: EUR
   quote: CHF
   symbol: EURCHF=X
-
 - base: CHF
   quote: EUR
   symbol: CHFEUR=X
-
 - base: USD
   quote: GBP
   symbol: USDGBP=X
-
 - base: GBP
   quote: USD
   symbol: GBPUSD=X
-
 - base: USD
   quote: CZK
   symbol: USDCZK=X
-
 - base: CZK
   quote: USD
   symbol: CZKUSD=X
-
 - base: USD
   quote: JPY
   symbol: USDJPY=X
-
 - base: JPY
   quote: USD
   symbol: JPYUSD=X
-
 - base: USD
   quote: CHF
   symbol: USDCHF=X
-
 - base: CHF
   quote: USD
   symbol: CHFUSD=X
-
 - base: GBP
   quote: CZK
   symbol: GBPCZK=X
-
 - base: CZK
   quote: GBP
   symbol: CZKGBP=X
-
 - base: GBP
   quote: JPY
   symbol: GBPJPY=X
-
 - base: JPY
   quote: GBP
   symbol: JPYGBP=X
-
 - base: GBP
   quote: CHF
   symbol: GBPCHF=X
-
 - base: CHF
   quote: GBP
   symbol: CHFGBP=X
-
 - base: CZK
   quote: JPY
   symbol: CZKJPY=X
-
 - base: JPY
   quote: CZK
-  symbol: J PYCZK=X
-
+  symbol: JPYCZK=X
 - base: CZK
   quote: CHF
   symbol: CZKCHF=X
-
 - base: CHF
   quote: CZK
   symbol: CHFCZK=X
-
 - base: JPY
   quote: CHF
   symbol: JPYCHF=X
-
 - base: CHF
   quote: JPY
   symbol: CHFJPY=X
+- base: CAD
+  quote: PLN
+  symbol: CADPLN=X
+- base: AUD
+  quote: PLN
+  symbol: AUDPLN=X
+- base: NOK
+  quote: PLN
+  symbol: NOKPLN=X
+- base: SEK
+  quote: PLN
+  symbol: SEKPLN=X
+- base: DKK
+  quote: PLN
+  symbol: DKKPLN=X
+- base: CNY
+  quote: PLN
+  symbol: CNYPLN=X
+- base: USD
+  quote: CAD
+  symbol: USDCAD=X
+- base: AUD
+  quote: USD
+  symbol: AUDUSD=X
+- base: NZD
+  quote: USD
+  symbol: NZDUSD=X
+- base: USD
+  quote: CNY
+  symbol: USDCNY=X
+- base: USD
+  quote: SGD
+  symbol: USDSGD=X
+- base: USD
+  quote: SEK
+  symbol: USDSEK=X
+- base: USD
+  quote: NOK
+  symbol: USDNOK=X
+- base: USD
+  quote: DKK
+  symbol: USDDKK=X
+- base: EUR
+  quote: CAD
+  symbol: EURCAD=X
+- base: EUR
+  quote: AUD
+  symbol: EURAUD=X
+- base: EUR
+  quote: NOK
+  symbol: EURNOK=X
+- base: EUR
+  quote: SEK
+  symbol: EURSEK=X
+- base: EUR
+  quote: DKK
+  symbol: EURDKK=X
+- base: EUR
+  quote: CNY
+  symbol: EURCNY=X
+- base: EUR
+  quote: SGD
+  symbol: EURSGD=X
