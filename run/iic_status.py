@@ -1,4 +1,5 @@
 """Report batch status from Snowflake (read-only)."""
+
 from __future__ import annotations
 
 import argparse
@@ -25,12 +26,13 @@ def main():
             filters.append('"DATASET" = %s')
             params.append(args.dataset)
         if args.failed_only:
-            filters.append('"STATUS" IN (\'FAILED\', \'NO_DATA\')')
+            filters.append("\"STATUS\" IN ('FAILED', 'NO_DATA')")
         where = " WHERE " + " AND ".join(filters) if filters else ""
         query = (
             'SELECT "DATASET", "STATUS", COUNT(*), SUM("FETCHED_ROWS"), '
-            'SUM("CANDIDATE_ROWS") FROM "IIC_BATCHES"' + where +
-            ' GROUP BY "DATASET", "STATUS" ORDER BY "DATASET", "STATUS"'
+            'SUM("CANDIDATE_ROWS") FROM "IIC_BATCHES"'
+            + where
+            + ' GROUP BY "DATASET", "STATUS" ORDER BY "DATASET", "STATUS"'
         )
         with closing(repo.connection.cursor()) as cur:
             cur.execute(query, tuple(params))
@@ -41,8 +43,8 @@ def main():
                 cur.execute(
                     'SELECT "DATASET", "SYMBOL", "START_DATE", "END_DATE", '
                     '"STATUS", "ATTEMPTS", "ERROR_MESSAGE" FROM "IIC_BATCHES" '
-                    'WHERE "STATUS" IN (\'FAILED\', \'NO_DATA\')'
-                    + (' AND "DATASET" = %s' if args.dataset else '')
+                    "WHERE \"STATUS\" IN ('FAILED', 'NO_DATA')"
+                    + (' AND "DATASET" = %s' if args.dataset else "")
                     + ' ORDER BY "UPDATED_AT" DESC LIMIT 100',
                     (args.dataset,) if args.dataset else (),
                 )

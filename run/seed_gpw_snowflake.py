@@ -4,6 +4,7 @@ Dry-run by default. Example:
     uv run python -m run.seed_gpw_snowflake --csv data/gpw_stocks.csv
     uv run python -m run.seed_gpw_snowflake --csv data/gpw_stocks.csv --write
 """
+
 from __future__ import annotations
 
 import argparse
@@ -44,11 +45,20 @@ def main() -> None:
                 by_symbol[str(symbol)] = (int(asset_id), venue)
             for symbol in securities["symbol"]:
                 if symbol in by_symbol and by_symbol[symbol][1] != "GPW":
-                    raise RuntimeError(f"Security {symbol} already exists with venue {by_symbol[symbol][1]}")
+                    raise RuntimeError(
+                        f"Security {symbol} already exists with venue {by_symbol[symbol][1]}"
+                    )
             unseen = securities[~securities["symbol"].isin(by_symbol)]
-            logger.info("CSV symbols=%d, existing=%d, new=%d", len(securities), len(securities) - len(unseen), len(unseen))
+            logger.info(
+                "CSV symbols=%d, existing=%d, new=%d",
+                len(securities),
+                len(securities) - len(unseen),
+                len(unseen),
+            )
             if not args.write:
-                logger.info("DRY RUN: no data written. Use --write to add %d securities.", len(unseen))
+                logger.info(
+                    "DRY RUN: no data written. Use --write to add %d securities.", len(unseen)
+                )
                 return
             if unseen.empty:
                 logger.info("No new securities to seed")
@@ -65,7 +75,17 @@ def main() -> None:
                         'INSERT INTO "SECURITIES" ("ASSET_ID", "INSTRUMENT_CLASS", "MARKET_TYPE", '
                         '"NAME", "SYMBOL", "CURRENCY", "CALENDAR_ID", "INIT_DATE", "VENUE") '
                         "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                        (next_id, "stock", "continuous", row.name, row.symbol, "PLN", 0, None, "GPW"),
+                        (
+                            next_id,
+                            "stock",
+                            "continuous",
+                            row.name,
+                            row.symbol,
+                            "PLN",
+                            0,
+                            None,
+                            "GPW",
+                        ),
                     )
                 cur.execute("COMMIT")
             except Exception:

@@ -29,7 +29,19 @@ def fetch_eod_prices(
         df["date"] = pd.to_datetime(df["date"]).dt.date
         df["volume"] = pd.to_numeric(df["volume"], errors="coerce").astype("Int64")
         return (
-            df[["symbol", "date", "open", "high", "low", "close", "volume", "dividend", "split_ratio"]]
+            df[
+                [
+                    "symbol",
+                    "date",
+                    "open",
+                    "high",
+                    "low",
+                    "close",
+                    "volume",
+                    "dividend",
+                    "split_ratio",
+                ]
+            ]
             .sort_values("date")
             .reset_index(drop=True)
         )

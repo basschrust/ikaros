@@ -4,6 +4,7 @@ Conventions: ABCXYZ=X quotes units of XYZ per one unit ABC.
 For example, CADPLN = USDPLN / USDCAD.
 Never infer OHLC extrema from daily source bars.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -64,4 +65,6 @@ def derive_closes(
     aligned["close"] = aligned["close_num"] / aligned["close_den"]
     aligned["symbol"] = spec.target
     aligned["comment"] = f"DERIVED_CLOSE: {spec.numerator} / {spec.denominator}"
-    return aligned[["date", "symbol", "close", "comment"]].sort_values("date").reset_index(drop=True)
+    return (
+        aligned[["date", "symbol", "close", "comment"]].sort_values("date").reset_index(drop=True)
+    )

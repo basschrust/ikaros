@@ -4,6 +4,7 @@ This initial implementation assumes one IIC writer at a time. Snowflake's
 standard-table UNIQUE constraints are informational, not enforced. Use a
 single scheduler until an atomic claim mechanism is introduced.
 """
+
 from __future__ import annotations
 
 from contextlib import closing
@@ -59,7 +60,11 @@ def should_run(
     if state is None:
         return True, "NEW"
     if state.status is Status.RUNNING and state.started_at is not None:
-        started = state.started_at.replace(tzinfo=timezone.utc) if state.started_at.tzinfo is None else state.started_at
+        started = (
+            state.started_at.replace(tzinfo=timezone.utc)
+            if state.started_at.tzinfo is None
+            else state.started_at
+        )
         reference = now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now
         if reference - started < timedelta(minutes=lease_minutes):
             return False, "IN_PROGRESS"
@@ -77,7 +82,7 @@ class Cursor(Protocol):
     def rowcount(self) -> int: ...
 
 
-DDL = '''CREATE TABLE IF NOT EXISTS "IIC_BATCHES" (
+DDL = """CREATE TABLE IF NOT EXISTS "IIC_BATCHES" (
     "BATCH_ID" VARCHAR NOT NULL,
     "DATASET" VARCHAR NOT NULL,
     "SYMBOL" VARCHAR NOT NULL,
@@ -92,10 +97,12 @@ DDL = '''CREATE TABLE IF NOT EXISTS "IIC_BATCHES" (
     "STARTED_AT" TIMESTAMP_NTZ,
     "FINISHED_AT" TIMESTAMP_NTZ,
     "UPDATED_AT" TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
-)'''
+)"""
 
-KEY_WHERE = ('"DATASET" = %s AND "SYMBOL" = %s AND "PROVIDER" = %s '
-             'AND "START_DATE" = TO_DATE(%s) AND "END_DATE" = TO_DATE(%s)')
+KEY_WHERE = (
+    '"DATASET" = %s AND "SYMBOL" = %s AND "PROVIDER" = %s '
+    'AND "START_DATE" = TO_DATE(%s) AND "END_DATE" = TO_DATE(%s)'
+)
 
 
 def _params(key: BatchKey) -> tuple:
@@ -131,12 +138,21 @@ class SnowflakeIIC:
         batch_id, status, started, attempts = records[0]
         return str(batch_id), BatchState(Status(status), started, int(attempts))
 
-    def start(self, key: BatchKey, *, force: bool = False,
-              retry_no_data: bool = False, lease_minutes: int = 90) -> tuple[bool, str]:
+    def start(
+        self,
+        key: BatchKey,
+        *,
+        force: bool = False,
+        retry_no_data: bool = False,
+        lease_minutes: int = 90,
+    ) -> tuple[bool, str]:
         current = self.read(key)
         eligible, reason = should_run(
-            current[1] if current else None, now=datetime.now(timezone.utc),
-            lease_minutes=lease_minutes, force=force, retry_no_data=retry_no_data,
+            current[1] if current else None,
+            now=datetime.now(timezone.utc),
+            lease_minutes=lease_minutes,
+            force=force,
+            retry_no_data=retry_no_data,
         )
         if not eligible:
             return False, reason
@@ -147,7 +163,7 @@ class SnowflakeIIC:
                     'INSERT INTO "IIC_BATCHES" '
                     '("BATCH_ID", "DATASET", "SYMBOL", "PROVIDER", "START_DATE", '
                     '"END_DATE", "STATUS", "ATTEMPTS", "STARTED_AT", "UPDATED_AT") '
-                    'VALUES (%s, %s, %s, %s, TO_DATE(%s), TO_DATE(%s), '
+                    "VALUES (%s, %s, %s, %s, TO_DATE(%s), TO_DATE(%s), "
                     "'RUNNING', 1, CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())",
                     (batch_id, *_params(key)),
                 )
@@ -164,8 +180,15 @@ class SnowflakeIIC:
                 )
         return True, reason
 
-    def finish(self, key: BatchKey, status: Status, *, fetched: int = 0,
-               candidate: int = 0, error: str | None = None) -> None:
+    def finish(
+        self,
+        key: BatchKey,
+        status: Status,
+        *,
+        fetched: int = 0,
+        candidate: int = 0,
+        error: str | None = None,
+    ) -> None:
         if status is Status.RUNNING:
             raise ValueError("Cannot finish with RUNNING")
         if fetched < 0 or candidate < 0:
