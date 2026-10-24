@@ -12,6 +12,7 @@ from datetime import date, timedelta
 from typing import Iterator
 
 import pandas as pd
+from openbb_core.provider.utils.errors import EmptyDataError
 
 from config.config import load_config
 from database.repositories.factory import repository_from_config
@@ -48,6 +49,8 @@ INSERT INTO IKAROS_FX_BACKFILL_STAGE
 (CURRENCY_PAIR_ID, SYMBOL, TRADE_DATE, OPEN, HIGH, LOW, CLOSE, VOLUME)
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
 """
+
+logger = logging.getLogger(__name__)
 
 
 def year_windows(start: date, end: date) -> Iterator[tuple[date, date]]:
@@ -188,7 +191,31 @@ def main() -> None:
                 label = f"{symbol} {begin}..{end}"
                 try:
                     # Fetch first; compare existing valid dates before writing.
-                    df = fetch_fx_history(symbol, begin.isoformat(), end.isoformat())
+                    try:
+                        df = fetch_fx_history(
+                            symbol,
+                            begin.isoformat(),
+                            end.isoformat(),
+                        )
+                    except EmptyDataError:
+                        logger.warning(
+                            "NO_DATA %s %s..%s: provider returned no observations",
+                            symbol,
+                            begin,
+                            end,
+                        )
+                        continue
+                    except Exception:
+                        logger.exception(
+                            "FAILED %s %s..%s",
+                            symbol,
+                            begin,
+                            end,
+                        )
+                        failed_batches.append((symbol, begin, end))
+                        if not args.continue_on_error:
+                            raise
+                        continue
                     rows = normalize_batch(df, pair_id, symbol, begin, end)
                     existing = persisted_dates(repo.connection, pair_id, begin, end)
                     missing_rows = [row for row in rows if row[2] not in existing]
