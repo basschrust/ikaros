@@ -3,6 +3,7 @@
 Default is read-only dry run. With --write, stage and MERGE only missing
 (date, currency_pair_id) records. Direct observations remain untouched.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -54,8 +55,8 @@ def fetch_close_rows(connection, symbol: str, start: date, end: date) -> pd.Data
         cur.execute(
             'SELECT TO_VARCHAR("DATE", \'YYYY-MM-DD\') AS TRADE_DATE, "CLOSE" '
             'FROM "FX_RATES" WHERE "SYMBOL" = %s '
-            'AND "DATE" >= TO_TIMESTAMP_NTZ(%s, \'YYYY-MM-DD\') '
-            'AND "DATE" < DATEADD(day, 1, TO_TIMESTAMP_NTZ(%s, \'YYYY-MM-DD\')) '
+            "AND \"DATE\" >= TO_TIMESTAMP_NTZ(%s, 'YYYY-MM-DD') "
+            "AND \"DATE\" < DATEADD(day, 1, TO_TIMESTAMP_NTZ(%s, 'YYYY-MM-DD')) "
             'ORDER BY "DATE"',
             (symbol, start.isoformat(), end.isoformat()),
         )
@@ -68,8 +69,8 @@ def target_dates(connection, pair_id: int, start: date, end: date) -> set[str]:
         cur.execute(
             'SELECT TO_VARCHAR("DATE", \'YYYY-MM-DD\') FROM "FX_RATES" '
             'WHERE "CURRENCY_PAIR_ID" = %s '
-            'AND "DATE" >= TO_TIMESTAMP_NTZ(%s, \'YYYY-MM-DD\') '
-            'AND "DATE" < DATEADD(day, 1, TO_TIMESTAMP_NTZ(%s, \'YYYY-MM-DD\'))',
+            "AND \"DATE\" >= TO_TIMESTAMP_NTZ(%s, 'YYYY-MM-DD') "
+            "AND \"DATE\" < DATEADD(day, 1, TO_TIMESTAMP_NTZ(%s, 'YYYY-MM-DD'))",
             (pair_id, start.isoformat(), end.isoformat()),
         )
         return {str(item[0]) for item in cur.fetchall()}
@@ -100,8 +101,12 @@ def merge_closes(connection, pair_id: int, frame: pd.DataFrame) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--symbols", nargs="+", default=list(CROSSES),
-                        help="Target cross pairs, e.g. CADPLN=X CNYPLN=X")
+    parser.add_argument(
+        "--symbols",
+        nargs="+",
+        default=list(CROSSES),
+        help="Target cross pairs, e.g. CADPLN=X CNYPLN=X",
+    )
     parser.add_argument("--start", type=date.fromisoformat, default=date(2020, 1, 1))
     parser.add_argument("--end", type=date.fromisoformat, default=date(2025, 12, 31))
     parser.add_argument("--write", action="store_true", help="Persist derived closes")
@@ -124,15 +129,31 @@ def main() -> None:
             try:
                 pair_id = existing_pair_id(repo.connection, symbol)
                 numerator = fetch_close_rows(repo.connection, spec.numerator, args.start, args.end)
-                denominator = fetch_close_rows(repo.connection, spec.denominator, args.start, args.end)
+                denominator = fetch_close_rows(
+                    repo.connection, spec.denominator, args.start, args.end
+                )
                 if numerator.empty or denominator.empty:
-                    LOGGER.warning("NO_SOURCE %s: %s=%d rows; %s=%d rows", symbol,
-                                   spec.numerator, len(numerator), spec.denominator, len(denominator))
+                    LOGGER.warning(
+                        "NO_SOURCE %s: %s=%d rows; %s=%d rows",
+                        symbol,
+                        spec.numerator,
+                        len(numerator),
+                        spec.denominator,
+                        len(denominator),
+                    )
                     continue
-                derived = derive_closes(numerator, denominator, spec, start=args.start, end=args.end)
+                derived = derive_closes(
+                    numerator, denominator, spec, start=args.start, end=args.end
+                )
                 existing = target_dates(repo.connection, pair_id, args.start, args.end)
                 new = derived.loc[~derived["date"].map(lambda d: d.isoformat()).isin(existing)]
-                LOGGER.info("%s: aligned=%d existing=%d new=%d", symbol, len(derived), len(existing), len(new))
+                LOGGER.info(
+                    "%s: aligned=%d existing=%d new=%d",
+                    symbol,
+                    len(derived),
+                    len(existing),
+                    len(new),
+                )
                 if args.write and not new.empty:
                     inserted = merge_closes(repo.connection, pair_id, new)
                     verified = target_dates(repo.connection, pair_id, args.start, args.end)
@@ -146,7 +167,9 @@ def main() -> None:
                 LOGGER.exception("FAILED %s", symbol)
                 if not args.continue_on_error:
                     raise
-    LOGGER.info("Finished: inserted=%d failed_pairs=%d dry_run=%s", total, len(failures), not args.write)
+    LOGGER.info(
+        "Finished: inserted=%d failed_pairs=%d dry_run=%s", total, len(failures), not args.write
+    )
     if failures:
         raise SystemExit("Failed pairs: " + ", ".join(failures))
 

@@ -1,11 +1,22 @@
 """Pure helpers for GPW daily-equity reference data and OHLCV backfills."""
+
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 
 import pandas as pd
 
-PRICE_FIELDS = ("symbol", "date", "open", "high", "low", "close", "volume", "dividend", "split_ratio")
+PRICE_FIELDS = (
+    "symbol",
+    "date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "dividend",
+    "split_ratio",
+)
 
 
 def year_windows(start: date, end: date) -> list[tuple[date, date]]:

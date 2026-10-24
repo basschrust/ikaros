@@ -3,7 +3,12 @@ from datetime import date
 import pandas as pd
 import pytest
 
-from ingestion.gpw_backfill import missing_observations, normalize_prices, normalize_securities, year_windows
+from ingestion.gpw_backfill import (
+    missing_observations,
+    normalize_prices,
+    normalize_securities,
+    year_windows,
+)
 
 
 def test_year_windows():
@@ -20,7 +25,9 @@ def test_year_windows_invalid():
 
 
 def test_normalize_securities():
-    actual = normalize_securities(pd.DataFrame({"ticker": [" pkn ", "ABC.WA"], "name": ["PKN", "ABC"]}))
+    actual = normalize_securities(
+        pd.DataFrame({"ticker": [" pkn ", "ABC.WA"], "name": ["PKN", "ABC"]})
+    )
     assert actual["symbol"].tolist() == ["PKN.WA", "ABC.WA"]
 
 
@@ -30,14 +37,43 @@ def test_duplicate_securities_rejected():
 
 
 def sample_prices():
-    return pd.DataFrame([
-        dict(symbol="ABC.WA", date="2024-01-03", open=12, high=14, low=11, close=13,
-             volume=100, dividend=None, split_ratio=None),
-        dict(symbol="ABC.WA", date="2024-01-03", open=12, high=14, low=11, close=13.5,
-             volume=101, dividend=None, split_ratio=None),
-        dict(symbol="ABC.WA", date="2024-01-04", open=13, high=15, low=12, close=14,
-             volume=102, dividend=None, split_ratio=None),
-    ])
+    return pd.DataFrame(
+        [
+            dict(
+                symbol="ABC.WA",
+                date="2024-01-03",
+                open=12,
+                high=14,
+                low=11,
+                close=13,
+                volume=100,
+                dividend=None,
+                split_ratio=None,
+            ),
+            dict(
+                symbol="ABC.WA",
+                date="2024-01-03",
+                open=12,
+                high=14,
+                low=11,
+                close=13.5,
+                volume=101,
+                dividend=None,
+                split_ratio=None,
+            ),
+            dict(
+                symbol="ABC.WA",
+                date="2024-01-04",
+                open=13,
+                high=15,
+                low=12,
+                close=14,
+                volume=102,
+                dividend=None,
+                split_ratio=None,
+            ),
+        ]
+    )
 
 
 def test_normalize_prices_deduplicates_and_filters():

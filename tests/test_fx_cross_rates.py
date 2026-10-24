@@ -28,20 +28,27 @@ def test_cross_uses_only_matching_dates():
 
 def test_rejects_zero_denominator():
     with pytest.raises(ValueError, match="nonpositive"):
-        derive_closes(frame(["2024-01-02"], [4.0]),
-                      frame(["2024-01-02"], [0.0]), SPEC, start=START, end=END)
+        derive_closes(
+            frame(["2024-01-02"], [4.0]), frame(["2024-01-02"], [0.0]), SPEC, start=START, end=END
+        )
 
 
 def test_rejects_duplicate_dates():
     with pytest.raises(ValueError, match="duplicate source dates"):
-        derive_closes(frame(["2024-01-02", "2024-01-02"], [4, 5]),
-                      frame(["2024-01-02"], [1.25]), SPEC, start=START, end=END)
+        derive_closes(
+            frame(["2024-01-02", "2024-01-02"], [4, 5]),
+            frame(["2024-01-02"], [1.25]),
+            SPEC,
+            start=START,
+            end=END,
+        )
 
 
 def test_rejects_bad_prices():
     with pytest.raises(ValueError, match="missing or nonpositive"):
-        derive_closes(frame(["2024-01-02"], [None]),
-                      frame(["2024-01-02"], [1.25]), SPEC, start=START, end=END)
+        derive_closes(
+            frame(["2024-01-02"], [None]), frame(["2024-01-02"], [1.25]), SPEC, start=START, end=END
+        )
 
 
 def test_rejects_reversed_range():

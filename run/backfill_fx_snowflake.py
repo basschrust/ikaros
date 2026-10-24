@@ -2,6 +2,7 @@
 
 Run from Ikaros project root. By default this is a read-only dry run.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -61,8 +62,9 @@ def year_windows(start: date, end: date) -> Iterator[tuple[date, date]]:
         current = chunk_end + timedelta(days=1)
 
 
-def normalize_batch(frame: pd.DataFrame, pair_id: int, symbol: str,
-                    start: date, end: date) -> list[tuple]:
+def normalize_batch(
+    frame: pd.DataFrame, pair_id: int, symbol: str, start: date, end: date
+) -> list[tuple]:
     """Validate observations, normalize dates, discard duplicated response dates."""
     if frame.empty:
         return []
@@ -80,18 +82,32 @@ def normalize_batch(frame: pd.DataFrame, pair_id: int, symbol: str,
         raise ValueError(f"{symbol}: NULL OHLC detected; aborting batch")
     rows = []
     for row in batch.itertuples(index=False):
+
         def number(value):
             return None if pd.isna(value) else float(value)
-        rows.append((pair_id, symbol, row.date.isoformat(),
-                     number(row.open), number(row.high), number(row.low),
-                     number(row.close), number(row.volume)))
+
+        rows.append(
+            (
+                pair_id,
+                symbol,
+                row.date.isoformat(),
+                number(row.open),
+                number(row.high),
+                number(row.low),
+                number(row.close),
+                number(row.volume),
+            )
+        )
     return rows
 
 
 def existing_pair_id(connection, symbol: str) -> int:
     with connection.cursor() as cur:
-        cur.execute('SELECT "CURRENCY_PAIR_ID" FROM "CURRENCY_PAIRS" '
-                    'WHERE "SYMBOL" = %s AND "IS_ACTIVE" = TRUE', (symbol,))
+        cur.execute(
+            'SELECT "CURRENCY_PAIR_ID" FROM "CURRENCY_PAIRS" '
+            'WHERE "SYMBOL" = %s AND "IS_ACTIVE" = TRUE',
+            (symbol,),
+        )
         rows = cur.fetchall()
     if len(rows) != 1:
         raise ValueError(
@@ -103,11 +119,13 @@ def existing_pair_id(connection, symbol: str) -> int:
 
 def persisted_dates(connection, pair_id: int, begin: date, end: date) -> set[str]:
     with connection.cursor() as cur:
-        cur.execute('SELECT TO_CHAR("DATE", \'YYYY-MM-DD\') FROM "FX_RATES" '
-                    'WHERE "CURRENCY_PAIR_ID" = %s '
-                    'AND "DATE" >= TO_TIMESTAMP_NTZ(%s, \'YYYY-MM-DD\') '
-                    'AND "DATE" < DATEADD(day, 1, TO_TIMESTAMP_NTZ(%s, \'YYYY-MM-DD\'))',
-                    (pair_id, begin.isoformat(), end.isoformat()))
+        cur.execute(
+            'SELECT TO_CHAR("DATE", \'YYYY-MM-DD\') FROM "FX_RATES" '
+            'WHERE "CURRENCY_PAIR_ID" = %s '
+            "AND \"DATE\" >= TO_TIMESTAMP_NTZ(%s, 'YYYY-MM-DD') "
+            "AND \"DATE\" < DATEADD(day, 1, TO_TIMESTAMP_NTZ(%s, 'YYYY-MM-DD'))",
+            (pair_id, begin.isoformat(), end.isoformat()),
+        )
         return {str(row[0]) for row in cur.fetchall()}
 
 
@@ -132,14 +150,21 @@ def merge_batch(connection, rows: list[tuple]) -> int:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--symbols", nargs="+", default=["EURPLN=X"],
-                   help="Symbols configured in Snowflake CURRENCY_PAIRS")
+    p.add_argument(
+        "--symbols",
+        nargs="+",
+        default=["EURPLN=X"],
+        help="Symbols configured in Snowflake CURRENCY_PAIRS",
+    )
     p.add_argument("--start", type=date.fromisoformat, default=date(2020, 1, 1))
     p.add_argument("--end", type=date.fromisoformat, default=date(2025, 12, 31))
     p.add_argument("--write", action="store_true", help="Perform MERGE (default: dry run)")
     p.add_argument("--delay", type=float, default=0.5, help="Seconds between API requests")
-    p.add_argument("--continue-on-error", action="store_true",
-                   help="Continue other symbol/year batches when one fails")
+    p.add_argument(
+        "--continue-on-error",
+        action="store_true",
+        help="Continue other symbol/year batches when one fails",
+    )
     p.add_argument("--iic-force", action="store_true")
     p.add_argument("--iic-retry-no-data", action="store_true")
     p.add_argument("--iic-lease-minutes", type=int, default=90)
@@ -171,7 +196,9 @@ def main() -> None:
                 key = BatchKey("FX", symbol, "yfinance", begin, end)
                 if iic:
                     allowed, reason = iic.start(
-                        key, force=args.iic_force, retry_no_data=args.iic_retry_no_data,
+                        key,
+                        force=args.iic_force,
+                        retry_no_data=args.iic_retry_no_data,
                         lease_minutes=args.iic_lease_minutes,
                     )
                     if not allowed:
@@ -186,8 +213,13 @@ def main() -> None:
                     existing = persisted_dates(repo.connection, pair_id, begin, end)
                     missing_rows = [row for row in rows if row[2] not in existing]
                     fetched_count, candidate_count = len(rows), len(missing_rows)
-                    LOGGER.info("%s: fetched=%d existing=%d new=%d",
-                                label, len(rows), len(existing), len(missing_rows))
+                    LOGGER.info(
+                        "%s: fetched=%d existing=%d new=%d",
+                        label,
+                        len(rows),
+                        len(existing),
+                        len(missing_rows),
+                    )
                     if args.write and not rows:
                         if iic:
                             iic.finish(key, Status.NO_DATA)
@@ -198,16 +230,24 @@ def main() -> None:
                         missing = {r[2] for r in missing_rows} - confirmed
                         if missing:
                             raise RuntimeError(f"Readback missing dates: {sorted(missing)}")
-                        LOGGER.info("%s: inserted=%d verified=%d", label,
-                                    inserted, len(missing_rows))
+                        LOGGER.info(
+                            "%s: inserted=%d verified=%d", label, inserted, len(missing_rows)
+                        )
                         total_inserted += inserted
                     if iic:
-                        iic.finish(key, Status.SUCCESS, fetched=fetched_count, candidate=candidate_count)
+                        iic.finish(
+                            key, Status.SUCCESS, fetched=fetched_count, candidate=candidate_count
+                        )
                 except Exception as exc:
                     if iic:
                         try:
-                            iic.finish(key, Status.FAILED, fetched=fetched_count,
-                                       candidate=candidate_count, error=str(exc))
+                            iic.finish(
+                                key,
+                                Status.FAILED,
+                                fetched=fetched_count,
+                                candidate=candidate_count,
+                                error=str(exc),
+                            )
                         except Exception:
                             LOGGER.exception("Unable to record IIC failure: %s", label)
                     LOGGER.exception("FAILED %s", label)
@@ -217,8 +257,12 @@ def main() -> None:
                 finally:
                     if args.delay:
                         time.sleep(args.delay)
-    LOGGER.info("Finished: inserted=%d failed_batches=%d dry_run=%s",
-                total_inserted, len(failures), not args.write)
+    LOGGER.info(
+        "Finished: inserted=%d failed_batches=%d dry_run=%s",
+        total_inserted,
+        len(failures),
+        not args.write,
+    )
     if failures:
         raise SystemExit("Failed batches: " + "; ".join(failures))
 

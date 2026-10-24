@@ -3,6 +3,7 @@
 Dry-run by default. Use --write to persist only missing symbol/date rows.
 The provider is OpenBB's existing yfinance equity implementation.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -24,7 +25,9 @@ logger = logging.getLogger(__name__)
 
 def registered_symbols(conn, symbols: list[str] | None, limit: int | None) -> list[str]:
     with closing(conn.cursor()) as cur:
-        cur.execute('SELECT "SYMBOL" FROM "SECURITIES" WHERE "VENUE" = %s ORDER BY "SYMBOL"', ("GPW",))
+        cur.execute(
+            'SELECT "SYMBOL" FROM "SECURITIES" WHERE "VENUE" = %s ORDER BY "SYMBOL"', ("GPW",)
+        )
         all_symbols = [str(row[0]) for row in cur.fetchall() if row[0]]
     if not all_symbols:
         raise RuntimeError("No GPW securities found: run seed_gpw_snowflake first")
@@ -60,13 +63,13 @@ def persist_batch(conn, frame: pd.DataFrame) -> int:
         '"CLOSE", "VOLUME", "DIVIDEND", "SPLIT_RATIO") '
         "VALUES (%s, TO_TIMESTAMP_NTZ(%s, 'YYYY-MM-DD'), %s, %s, %s, %s, %s, %s, %s)"
     )
-    merge_sql = '''MERGE INTO "PRICES" AS target
+    merge_sql = """MERGE INTO "PRICES" AS target
         USING "IKAROS_PRICE_STAGE" AS source
         ON target."SYMBOL" = source."SYMBOL" AND TO_DATE(target."DATE") = TO_DATE(source."DATE")
         WHEN NOT MATCHED THEN INSERT
         ("SYMBOL", "DATE", "OPEN", "HIGH", "LOW", "CLOSE", "VOLUME", "DIVIDEND", "SPLIT_RATIO")
         VALUES (source."SYMBOL", source."DATE", source."OPEN", source."HIGH", source."LOW",
-                source."CLOSE", source."VOLUME", source."DIVIDEND", source."SPLIT_RATIO")'''
+                source."CLOSE", source."VOLUME", source."DIVIDEND", source."SPLIT_RATIO")"""
     rows = []
     for rec in frame.itertuples(index=False):
         values = []
@@ -97,10 +100,14 @@ def persist_batch(conn, frame: pd.DataFrame) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--symbols", nargs="+", metavar="SYMBOL", help="Default: all seeded GPW symbols")
+    parser.add_argument(
+        "--symbols", nargs="+", metavar="SYMBOL", help="Default: all seeded GPW symbols"
+    )
     parser.add_argument("--start", type=date.fromisoformat, default=date(2020, 1, 1))
     parser.add_argument("--end", type=date.fromisoformat, default=date(2025, 12, 31))
-    parser.add_argument("--limit", type=int, default=None, help="Process only the first N registered securities")
+    parser.add_argument(
+        "--limit", type=int, default=None, help="Process only the first N registered securities"
+    )
     parser.add_argument("--write", action="store_true", help="Persist missing observations")
     parser.add_argument("--continue-on-error", action="store_true")
     parser.add_argument("--iic-force", action="store_true", help="Recheck successful batches")
@@ -123,13 +130,20 @@ def main() -> None:
         if iic:
             iic.prepare()
         symbols = registered_symbols(repo.connection, args.symbols, args.limit)
-        logger.info("GPW securities: %d, yearly periods: %d, write=%s", len(symbols), len(windows), args.write)
+        logger.info(
+            "GPW securities: %d, yearly periods: %d, write=%s",
+            len(symbols),
+            len(windows),
+            args.write,
+        )
         for symbol in symbols:
             for begin, end in windows:
                 key = BatchKey("GPW", symbol, "yfinance", begin, end)
                 if iic:
                     allowed, reason = iic.start(
-                        key, force=args.iic_force, retry_no_data=args.iic_retry_no_data,
+                        key,
+                        force=args.iic_force,
+                        retry_no_data=args.iic_retry_no_data,
                         lease_minutes=args.iic_lease_minutes,
                     )
                     if not allowed:
@@ -138,7 +152,11 @@ def main() -> None:
                 fetched_count = 0
                 candidate_count = 0
                 try:
-                    fetched = fetch_eod_prices(symbol=symbol, start_date=begin.isoformat(), end_date=(end + timedelta(days=1)).isoformat())
+                    fetched = fetch_eod_prices(
+                        symbol=symbol,
+                        start_date=begin.isoformat(),
+                        end_date=(end + timedelta(days=1)).isoformat(),
+                    )
                     if fetched.empty:
                         logger.warning("NO_DATA %s %s..%s", symbol, begin, end)
                         if iic:
@@ -150,28 +168,46 @@ def main() -> None:
                     attempted += len(clean)
                     missing_count += len(missing)
                     fetched_count, candidate_count = len(clean), len(missing)
-                    logger.info("%s %s..%s fetched=%d existing=%d missing=%d", symbol, begin, end,
-                                len(clean), len(clean)-len(missing), len(missing))
+                    logger.info(
+                        "%s %s..%s fetched=%d existing=%d missing=%d",
+                        symbol,
+                        begin,
+                        end,
+                        len(clean),
+                        len(clean) - len(missing),
+                        len(missing),
+                    )
                     if args.write and not missing.empty:
                         persist_batch(repo.connection, missing)
                         verified = existing_dates(repo.connection, symbol, begin, end)
                         gaps = set(missing["date"]) - verified
                         if gaps:
-                            raise RuntimeError(f"Readback dates missing for {symbol}: {sorted(gaps)[:10]}")
+                            raise RuntimeError(
+                                f"Readback dates missing for {symbol}: {sorted(gaps)[:10]}"
+                            )
                     if iic:
-                        iic.finish(key, Status.SUCCESS, fetched=fetched_count, candidate=candidate_count)
+                        iic.finish(
+                            key, Status.SUCCESS, fetched=fetched_count, candidate=candidate_count
+                        )
                 except Exception as exc:
                     if iic:
                         try:
-                            iic.finish(key, Status.FAILED, fetched=fetched_count,
-                                       candidate=candidate_count, error=str(exc))
+                            iic.finish(
+                                key,
+                                Status.FAILED,
+                                fetched=fetched_count,
+                                candidate=candidate_count,
+                                error=str(exc),
+                            )
                         except Exception:
                             logger.exception("Unable to record IIC failure for %s", symbol)
                     logger.exception("FAILED %s %s..%s", symbol, begin, end)
                     failed.append((symbol, begin, end))
                     if not args.continue_on_error:
                         raise
-    logger.info("Finished: fetched=%d candidate_new=%d failures=%d", attempted, missing_count, len(failed))
+    logger.info(
+        "Finished: fetched=%d candidate_new=%d failures=%d", attempted, missing_count, len(failed)
+    )
     if failed:
         logger.error("Failed chunks: %s", ", ".join(f"{s}:{a}..{b}" for s, a, b in failed))
         raise SystemExit(1)
