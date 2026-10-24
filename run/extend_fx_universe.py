@@ -1,4 +1,5 @@
 """Merge FX expansion into config/currencies.yaml; dry-run unless --write."""
+
 from __future__ import annotations
 
 import argparse
@@ -33,7 +34,8 @@ def merge_universe(existing: dict, expansion: dict) -> tuple[dict, dict[str, int
         if code in currency_by_code:
             current = currency_by_code[code]
             if (current.get("name"), current.get("minor_unit")) != (
-                item["name"], item["minor_unit"]
+                item["name"],
+                item["minor_unit"],
             ):
                 raise ValueError(f"Conflicting currency: {code}")
             continue

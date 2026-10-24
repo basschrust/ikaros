@@ -1,4 +1,5 @@
 """Print, but do not run, seeding and Snowflake backfill commands."""
+
 import argparse
 from pathlib import Path
 

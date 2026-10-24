@@ -5,6 +5,7 @@ Dry-run by default. Run from project root:
     uv run python -m run.seed_fx_reference --symbols USDPLN=X EURUSD=X --write
     uv run python -m run.seed_fx_reference --all --write
 """
+
 from __future__ import annotations
 
 import argparse
@@ -18,7 +19,9 @@ from database.repositories.factory import repository_from_config
 log = logging.getLogger("ikaros.seed_fx")
 
 
-def select_reference(config: dict[str, Any], symbols: list[str] | None) -> tuple[list[dict], list[dict]]:
+def select_reference(
+    config: dict[str, Any], symbols: list[str] | None
+) -> tuple[list[dict], list[dict]]:
     currencies = config.get("currencies", [])
     pairs = config.get("currency_pairs", [])
     by_code = {c["code"]: c for c in currencies}
@@ -54,7 +57,9 @@ def _fetch_reference(cur):
         ids[code] = int(currency_id)
         used_ids.add(currency_id)
 
-    cur.execute('SELECT "CURRENCY_PAIR_ID", "SYMBOL", "BASE_CURRENCY_ID", "QUOTE_CURRENCY_ID" FROM "CURRENCY_PAIRS"')
+    cur.execute(
+        'SELECT "CURRENCY_PAIR_ID", "SYMBOL", "BASE_CURRENCY_ID", "QUOTE_CURRENCY_ID" FROM "CURRENCY_PAIRS"'
+    )
     existing_pairs: dict[str, tuple[int, int, int]] = {}
     used_pair_ids = set()
     for pair_id, symbol, base_id, quote_id in cur.fetchall():
@@ -65,7 +70,9 @@ def _fetch_reference(cur):
     return ids, existing_pairs
 
 
-def seed(connection, currencies: list[dict], pairs: list[dict], write: bool = False) -> tuple[int, int]:
+def seed(
+    connection, currencies: list[dict], pairs: list[dict], write: bool = False
+) -> tuple[int, int]:
     """Seed missing reference rows in one DML transaction. Returns counts of new rows."""
     with closing(connection.cursor()) as cur:
         ids, existing_pairs = _fetch_reference(cur)
@@ -99,12 +106,18 @@ def seed(connection, currencies: list[dict], pairs: list[dict], write: bool = Fa
                 if item["code"] in ids:
                     continue
                 next_currency_id += 1
-                cur.execute('INSERT INTO "CURRENCIES" ("CURRENCY_ID", "CODE", "NAME", "MINOR_UNIT", "IS_ACTIVE") VALUES (%s, %s, %s, %s, TRUE)', (next_currency_id, item["code"], item["name"], item.get("minor_unit", 2)))
+                cur.execute(
+                    'INSERT INTO "CURRENCIES" ("CURRENCY_ID", "CODE", "NAME", "MINOR_UNIT", "IS_ACTIVE") VALUES (%s, %s, %s, %s, TRUE)',
+                    (next_currency_id, item["code"], item["name"], item.get("minor_unit", 2)),
+                )
                 ids[item["code"]] = next_currency_id
             next_pair_id = max((v[0] for v in existing_pairs.values()), default=0)
             for item in missing_pairs:
                 next_pair_id += 1
-                cur.execute('INSERT INTO "CURRENCY_PAIRS" ("CURRENCY_PAIR_ID", "BASE_CURRENCY_ID", "QUOTE_CURRENCY_ID", "SYMBOL", "IS_ACTIVE") VALUES (%s, %s, %s, %s, TRUE)', (next_pair_id, ids[item["base"]], ids[item["quote"]], item["symbol"]))
+                cur.execute(
+                    'INSERT INTO "CURRENCY_PAIRS" ("CURRENCY_PAIR_ID", "BASE_CURRENCY_ID", "QUOTE_CURRENCY_ID", "SYMBOL", "IS_ACTIVE") VALUES (%s, %s, %s, %s, TRUE)',
+                    (next_pair_id, ids[item["base"]], ids[item["quote"]], item["symbol"]),
+                )
             cur.execute("COMMIT")
         except Exception:
             cur.execute("ROLLBACK")
@@ -116,7 +129,10 @@ def seed(connection, currencies: list[dict], pairs: list[dict], write: bool = Fa
                 raise RuntimeError(f"Currency not persisted: {item['code']}")
         for item in pairs:
             pair = verified_pairs.get(item["symbol"])
-            if pair is None or (pair[1], pair[2]) != (verified_ids[item["base"]], verified_ids[item["quote"]]):
+            if pair is None or (pair[1], pair[2]) != (
+                verified_ids[item["base"]],
+                verified_ids[item["quote"]],
+            ):
                 raise RuntimeError(f"Pair not persisted correctly: {item['symbol']}")
         log.info("PASS: %d currencies and %d pairs created", len(planned_codes), len(missing_pairs))
         return len(planned_codes), len(missing_pairs)
@@ -133,7 +149,9 @@ def main() -> None:
     settings = load_config("database.yaml")
     if settings.get("database", {}).get("driver", "").lower() != "snowflake":
         parser.error("Select database.driver: snowflake in config/database.yaml")
-    currencies, pairs = select_reference(load_config("currencies.yaml"), None if args.all else args.symbols)
+    currencies, pairs = select_reference(
+        load_config("currencies.yaml"), None if args.all else args.symbols
+    )
     repo = repository_from_config(settings)
     try:
         seed(repo.connection, currencies, pairs, write=args.write)
