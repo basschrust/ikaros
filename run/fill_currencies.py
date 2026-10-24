@@ -1,6 +1,4 @@
-import sys
 import pandas as pd
-from pathlib import Path
 
 
 from database.duckdb_storage import Repository
