@@ -18,3 +18,6 @@ lint:
 	$(UV) run --no-sync ruff format .
 
 check: lint-check test
+
+format:
+	$(UV) run --no-sync ruff format .
