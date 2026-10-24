@@ -7,13 +7,12 @@ from utils.dateutils import working_days_in_year
 
 
 if __name__ == "__main__":
-
     print("Filling calendar...")
     repository = Repository()
 
     calendars_config = load_config("calendars.yaml")
 
-    #calendar_id = sys.argv[1]
+    # calendar_id = sys.argv[1]
     for calendar in calendars_config.get("calendars", []):
         # check if this calendar is in DB?
         existing_calendars = repository.get_calendar(calendar.get("calendar_id"))
@@ -36,23 +35,27 @@ if __name__ == "__main__":
         trading_days_b = []
         for td in trading_days_a:
             if td not in non_trading_days:
-                trading_days_b.append(td) # TODO: optimize
+                trading_days_b.append(td)  # TODO: optimize
 
-        trading_days_df = pd.DataFrame({"date":trading_days_b,
-                                        "calendar_id": calendar.get("calendar_id"),
-                                        "comment": calendar.get("comment"),
-                                        "load_status": "PENDING",
-                                        "load_date": None
-                                        })
+        trading_days_df = pd.DataFrame(
+            {
+                "date": trading_days_b,
+                "calendar_id": calendar.get("calendar_id"),
+                "comment": calendar.get("comment"),
+                "load_status": "PENDING",
+                "load_date": None,
+            }
+        )
 
         repository.save_trading_days(trading_days_df=trading_days_df)
 
         # save non-trading days (2025-2027)
-        non_trading_days_df = pd.DataFrame({"date":non_trading_days,
-                                            "calendar_id": calendar.get("calendar_id"),
-                                            "comment": "",
-                                            })
+        non_trading_days_df = pd.DataFrame(
+            {
+                "date": non_trading_days,
+                "calendar_id": calendar.get("calendar_id"),
+                "comment": "",
+            }
+        )
 
         repository.save_non_trading_days(non_trading_days_df=non_trading_days_df)
-
-

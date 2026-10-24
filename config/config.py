@@ -31,5 +31,4 @@ def load_config(filename: str = DEFAULT_CONFIG) -> dict:
         loader.name = src_file
         config = loader.get_single_data()
 
-
     return config

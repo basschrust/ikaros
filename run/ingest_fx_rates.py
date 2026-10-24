@@ -1,4 +1,3 @@
-
 import logging
 
 import pandas as pd
@@ -19,7 +18,7 @@ def fetch_fx_history(
     """Fetch daily FX OHLC data from Yahoo Finance via OpenBB."""
 
     result = obb.currency.price.historical(
-    # result = obb.yfinance.currency.price(
+        # result = obb.yfinance.currency.price(
         symbol=symbol,
         start_date=start_date,
         end_date=end_date,
@@ -64,11 +63,7 @@ def fetch_all_fx_history(
 
     for pair in ccy_pairs.itertuples(index=False):
         try:
-            df = fetch_fx_history(
-                symbol=pair.symbol,
-                start_date=start_date,
-                end_date=end_date
-            )
+            df = fetch_fx_history(symbol=pair.symbol, start_date=start_date, end_date=end_date)
             df["currency_pair_id"] = pair.currency_pair_id
             frames.append(df)
             logger.info("Fetched %s: %d rows", pair.symbol, len(df))
@@ -86,7 +81,7 @@ if __name__ == "__main__":
     repository = Repository()
 
     config = load_config("currencies.yaml")
-    start_date = config.get("history",{}).get("start_date")
+    start_date = config.get("history", {}).get("start_date")
     end_date = config.get("history", {}).get("end_date", None)
 
     if not start_date:
@@ -94,10 +89,11 @@ if __name__ == "__main__":
 
     ccy_pairs_df = repository.get_currency_pairs()
 
-    fx_df = fetch_all_fx_history(ccy_pairs=ccy_pairs_df,
-                                 start_date=start_date,
-                                 end_date=end_date,
-                                 )
+    fx_df = fetch_all_fx_history(
+        ccy_pairs=ccy_pairs_df,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
     print(fx_df.head())
     print(fx_df.tail())

@@ -533,6 +533,11 @@ snowflake = [
     { name = "snowflake-connector-python", extra = ["pandas"] },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "ruff" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "duckdb", specifier = ">=1.1,<2" },
@@ -544,6 +549,9 @@ requires-dist = [
     { name = "snowflake-connector-python", extras = ["pandas"], marker = "extra == 'snowflake'", specifier = ">=4,<5" },
 ]
 provides-extras = ["snowflake", "dev"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "ruff", specifier = ">=0.15.22" }]
 
 [[package]]
 name = "importlib-metadata"

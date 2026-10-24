@@ -1,16 +1,21 @@
 """Daedalus-style repository factory for Ikaros."""
+
 from pathlib import Path
 from typing import Any
 from .interface import RepositoryInterface
 
 
-def create_repository(*, driver: str = "duckdb", output_dir: Path | str = "output", **config: Any) -> RepositoryInterface:
+def create_repository(
+    *, driver: str = "duckdb", output_dir: Path | str = "output", **config: Any
+) -> RepositoryInterface:
     driver = driver.lower()
     if driver == "duckdb":
         from database.duckdb_storage import Repository
+
         return Repository(output_dir=output_dir)
     if driver == "snowflake":
         from database.snowflake_storage import SnowflakeRepository
+
         return SnowflakeRepository(**config)
     raise ValueError(f"Unsupported database driver: {driver!r}")
 

@@ -6,6 +6,7 @@ schema, not a per-simulation schema. Credentials are read from environment.
 This first-stage adapter preserves the existing append-only semantics; MERGE,
 checkpointing, and ingestion metadata belong in the next reliability phase.
 """
+
 from __future__ import annotations
 
 import os
@@ -18,24 +19,125 @@ import pandas as pd
 # Optional dependency: importing the local factory does not require Snowflake.
 
 COLUMNS: dict[str, dict[str, str]] = {
-    "calendars": {"calendar_id": "NUMBER(38,0)", "name": "VARCHAR", "days_per_year": "NUMBER(38,0)", "init_date": "TIMESTAMP_NTZ", "working_days": "VARCHAR", "comment": "VARCHAR"},
-    "trading_days": {"date": "TIMESTAMP_NTZ", "calendar_id": "NUMBER(38,0)", "comment": "VARCHAR", "load_status": "VARCHAR", "load_date": "TIMESTAMP_NTZ"},
-    "non_trading_days": {"date": "TIMESTAMP_NTZ", "calendar_id": "NUMBER(38,0)", "comment": "VARCHAR"},
-    "securities": {"asset_id": "NUMBER(38,0)", "instrument_class": "VARCHAR", "market_type": "VARCHAR", "name": "VARCHAR", "reference_price": "FLOAT", "symbol": "VARCHAR", "currency": "VARCHAR", "calendar_id": "NUMBER(38,0)", "init_date": "TIMESTAMP_NTZ", "venue": "VARCHAR"},
-    "prices": {"symbol": "VARCHAR", "date": "TIMESTAMP_NTZ", "open": "FLOAT", "high": "FLOAT", "low": "FLOAT", "close": "FLOAT", "volume": "FLOAT", "dividend": "FLOAT", "split_ratio": "FLOAT"},
-    "currencies": {"currency_id": "NUMBER(38,0)", "symbol": "VARCHAR", "calendar_id": "NUMBER(38,0)", "name": "VARCHAR", "comment": "VARCHAR", "code": "VARCHAR", "minor_unit": "NUMBER(38,0)", "is_active": "BOOLEAN", "created_at": "TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()"},
-    "currency_pairs": {"currency_pair_id": "NUMBER(38,0)", "base_currency_id": "NUMBER(38,0)", "quote_currency_id": "NUMBER(38,0)", "symbol": "VARCHAR", "is_active": "BOOLEAN", "created_at": "TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()"},
-    "fx_rates": {"currency_pair_id": "NUMBER(38,0)", "symbol": "VARCHAR", "date": "TIMESTAMP_NTZ", "open": "FLOAT", "high": "FLOAT", "low": "FLOAT", "close": "FLOAT", "volume": "FLOAT", "comment": "VARCHAR", "ingested_at": "TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()"},
+    "calendars": {
+        "calendar_id": "NUMBER(38,0)",
+        "name": "VARCHAR",
+        "days_per_year": "NUMBER(38,0)",
+        "init_date": "TIMESTAMP_NTZ",
+        "working_days": "VARCHAR",
+        "comment": "VARCHAR",
+    },
+    "trading_days": {
+        "date": "TIMESTAMP_NTZ",
+        "calendar_id": "NUMBER(38,0)",
+        "comment": "VARCHAR",
+        "load_status": "VARCHAR",
+        "load_date": "TIMESTAMP_NTZ",
+    },
+    "non_trading_days": {
+        "date": "TIMESTAMP_NTZ",
+        "calendar_id": "NUMBER(38,0)",
+        "comment": "VARCHAR",
+    },
+    "securities": {
+        "asset_id": "NUMBER(38,0)",
+        "instrument_class": "VARCHAR",
+        "market_type": "VARCHAR",
+        "name": "VARCHAR",
+        "reference_price": "FLOAT",
+        "symbol": "VARCHAR",
+        "currency": "VARCHAR",
+        "calendar_id": "NUMBER(38,0)",
+        "init_date": "TIMESTAMP_NTZ",
+        "venue": "VARCHAR",
+    },
+    "prices": {
+        "symbol": "VARCHAR",
+        "date": "TIMESTAMP_NTZ",
+        "open": "FLOAT",
+        "high": "FLOAT",
+        "low": "FLOAT",
+        "close": "FLOAT",
+        "volume": "FLOAT",
+        "dividend": "FLOAT",
+        "split_ratio": "FLOAT",
+    },
+    "currencies": {
+        "currency_id": "NUMBER(38,0)",
+        "symbol": "VARCHAR",
+        "calendar_id": "NUMBER(38,0)",
+        "name": "VARCHAR",
+        "comment": "VARCHAR",
+        "code": "VARCHAR",
+        "minor_unit": "NUMBER(38,0)",
+        "is_active": "BOOLEAN",
+        "created_at": "TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()",
+    },
+    "currency_pairs": {
+        "currency_pair_id": "NUMBER(38,0)",
+        "base_currency_id": "NUMBER(38,0)",
+        "quote_currency_id": "NUMBER(38,0)",
+        "symbol": "VARCHAR",
+        "is_active": "BOOLEAN",
+        "created_at": "TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()",
+    },
+    "fx_rates": {
+        "currency_pair_id": "NUMBER(38,0)",
+        "symbol": "VARCHAR",
+        "date": "TIMESTAMP_NTZ",
+        "open": "FLOAT",
+        "high": "FLOAT",
+        "low": "FLOAT",
+        "close": "FLOAT",
+        "volume": "FLOAT",
+        "comment": "VARCHAR",
+        "ingested_at": "TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()",
+    },
 }
 
 WRITE_COLUMNS = {
     "calendars": ["calendar_id", "name", "days_per_year", "init_date", "working_days", "comment"],
     "trading_days": ["date", "calendar_id", "comment", "load_status", "load_date"],
     "non_trading_days": ["date", "calendar_id", "comment"],
-    "securities": ["asset_id", "instrument_class", "market_type", "name", "symbol", "currency", "calendar_id", "init_date", "venue"],
-    "currencies": ["currency_id", "symbol", "calendar_id", "name", "comment", "code", "minor_unit", "is_active"],
-    "currency_pairs": ["currency_pair_id", "base_currency_id", "quote_currency_id", "symbol", "is_active"],
-    "prices": ["symbol", "date", "open", "high", "low", "close", "volume", "dividend", "split_ratio"],
+    "securities": [
+        "asset_id",
+        "instrument_class",
+        "market_type",
+        "name",
+        "symbol",
+        "currency",
+        "calendar_id",
+        "init_date",
+        "venue",
+    ],
+    "currencies": [
+        "currency_id",
+        "symbol",
+        "calendar_id",
+        "name",
+        "comment",
+        "code",
+        "minor_unit",
+        "is_active",
+    ],
+    "currency_pairs": [
+        "currency_pair_id",
+        "base_currency_id",
+        "quote_currency_id",
+        "symbol",
+        "is_active",
+    ],
+    "prices": [
+        "symbol",
+        "date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "dividend",
+        "split_ratio",
+    ],
     "fx_rates": ["currency_pair_id", "symbol", "date", "open", "high", "low", "close", "volume"],
 }
 
@@ -49,10 +151,18 @@ def _ident(s: str) -> str:
 
 
 class SnowflakeRepository:
-    def __init__(self, *, database: str = "DAEDALUS", schema: str = "MARKET_DATA",
-                 warehouse: str = "DAEDALUS_WH", account: str | None = None,
-                 user: str | None = None, password: str | None = None,
-                 authenticator: str = "snowflake", role: str | None = None):
+    def __init__(
+        self,
+        *,
+        database: str = "DAEDALUS",
+        schema: str = "MARKET_DATA",
+        warehouse: str = "DAEDALUS_WH",
+        account: str | None = None,
+        user: str | None = None,
+        password: str | None = None,
+        authenticator: str = "snowflake",
+        role: str | None = None,
+    ):
         import snowflake.connector
 
         self.database, self.schema, self.warehouse = map(_ident, (database, schema, warehouse))
@@ -111,11 +221,17 @@ class SnowflakeRepository:
                 frame[field.upper()] = pd.to_datetime(frame[field.upper()], errors="coerce")
         # Arrow-backed write_pandas requires consistent datatypes and column casing.
         success, _chunks, count, _output = write_pandas(
-            self.connection, frame, table_name=_ident(table),
-            database=self.database, schema=self.schema, quote_identifiers=True,
+            self.connection,
+            frame,
+            table_name=_ident(table),
+            database=self.database,
+            schema=self.schema,
+            quote_identifiers=True,
         )
         if not success or count != len(frame):
-            raise RuntimeError(f"Snowflake write_pandas failed for {table}: {count}/{len(frame)} rows")
+            raise RuntimeError(
+                f"Snowflake write_pandas failed for {table}: {count}/{len(frame)} rows"
+            )
 
     def save_calendars(self, calendars_df: pd.DataFrame) -> None:
         self._insert_frame("calendars", calendars_df)
@@ -177,9 +293,11 @@ class SnowflakeRepository:
 
     def get_trading_days(self, calendar_id: int, year: int) -> pd.DataFrame:
         start, end = date(year, 1, 1), date(year + 1, 1, 1)
-        return self._query('SELECT * FROM "TRADING_DAYS" WHERE "CALENDAR_ID" = %s '
-                           'AND "DATE" >= %s AND "DATE" < %s ORDER BY "DATE"',
-                           (calendar_id, start, end))
+        return self._query(
+            'SELECT * FROM "TRADING_DAYS" WHERE "CALENDAR_ID" = %s '
+            'AND "DATE" >= %s AND "DATE" < %s ORDER BY "DATE"',
+            (calendar_id, start, end),
+        )
 
     def get_securities(self, venue: str | None = None) -> pd.DataFrame:
         if venue is None:

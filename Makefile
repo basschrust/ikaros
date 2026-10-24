@@ -1,21 +1,5 @@
-.PHONY: setup setup-cloud test test-verbose lock sync check-env
-
+.PHONY: test test-verbose lint lint-fix format format-check check
 UV ?= uv
-
-# Create a local Python 3.12 virtual environment and install dependencies.
-setup:
-	$(UV) sync --python 3.12 --extra dev
-
-setup-cloud:
-	$(UV) sync --python 3.12 --extra dev --extra snowflake
-
-# Resolve versions and write uv.lock. Commit uv.lock for exact reproducibility.
-lock:
-	$(UV) lock
-
-# Use the committed lockfile and do not silently update dependencies.
-sync:
-	$(UV) sync --locked --extra dev --extra snowflake
 
 test:
 	$(UV) run --no-sync python -m pytest -q tests
@@ -23,5 +7,16 @@ test:
 test-verbose:
 	$(UV) run --no-sync python -m pytest -v tests
 
-check-env:
-	$(UV) run --no-sync python -m run.check_environment
+lint:
+	$(UV) run --no-sync ruff check .
+
+lint-fix:
+	$(UV) run --no-sync ruff check --fix .
+
+format:
+	$(UV) run --no-sync ruff format .
+
+format-check:
+	$(UV) run --no-sync ruff format --check .
+
+check: lint format-check test

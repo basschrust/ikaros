@@ -19,7 +19,9 @@ def test_duckdb_factory(tmp_path):
 
 def test_duckdb_config(tmp_path):
     pytest.importorskip("duckdb")
-    repo = repository_from_config({"database": {"driver": "duckdb", "duckdb": {"output_dir": str(tmp_path)}}})
+    repo = repository_from_config(
+        {"database": {"driver": "duckdb", "duckdb": {"output_dir": str(tmp_path)}}}
+    )
     try:
         assert repo.connection.execute("SELECT 2").fetchone() == (2,)
     finally:

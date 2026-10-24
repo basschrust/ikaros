@@ -6,6 +6,7 @@ Run from Ikaros repository root:
 Requires SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_PASSWORD and
     pip install -r requirements-snowflake.txt
 """
+
 from __future__ import annotations
 
 import os
@@ -26,7 +27,9 @@ def main() -> int:
     required = ("SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER")
     missing = [name for name in required if not os.getenv(name)]
     sf_cfg = settings.get("snowflake", {})
-    if sf_cfg.get("authenticator", "snowflake") == "snowflake" and not os.getenv("SNOWFLAKE_PASSWORD"):
+    if sf_cfg.get("authenticator", "snowflake") == "snowflake" and not os.getenv(
+        "SNOWFLAKE_PASSWORD"
+    ):
         missing.append("SNOWFLAKE_PASSWORD")
     if missing:
         print("ERROR: missing environment variables: " + ", ".join(missing), file=sys.stderr)

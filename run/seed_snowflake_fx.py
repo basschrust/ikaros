@@ -6,6 +6,7 @@ Run from the Ikaros project root:
 
 Dry-run by default. Inserts only missing currencies/pairs, in one transaction.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -47,16 +48,19 @@ def main() -> None:
         # Create tables if missing, as implemented in SnowflakeRepository.
         with closing(repo.connection.cursor()) as cur:
             cur.execute(
-                'SELECT "CURRENCY_ID", "CODE" FROM "CURRENCIES" '
-                'WHERE "CODE" IN (%s, %s)', (pair["base"], pair["quote"])
+                'SELECT "CURRENCY_ID", "CODE" FROM "CURRENCIES" WHERE "CODE" IN (%s, %s)',
+                (pair["base"], pair["quote"]),
             )
             existing = {code: int(cid) for cid, code in cur.fetchall()}
             for c in currencies:
-                print(f'Currency {c["code"]}: {"already present" if c["code"] in existing else "will insert"}')
+                print(
+                    f"Currency {c['code']}: {'already present' if c['code'] in existing else 'will insert'}"
+                )
 
             cur.execute(
                 'SELECT "CURRENCY_PAIR_ID", "BASE_CURRENCY_ID", "QUOTE_CURRENCY_ID" '
-                'FROM "CURRENCY_PAIRS" WHERE "SYMBOL" = %s', (args.symbol,)
+                'FROM "CURRENCY_PAIRS" WHERE "SYMBOL" = %s',
+                (args.symbol,),
             )
             found = cur.fetchall()
             if len(found) > 1:
@@ -66,7 +70,8 @@ def main() -> None:
                 if any(c["code"] not in existing for c in currencies):
                     raise RuntimeError("Pair exists but one of its currencies is missing")
                 if (int(found[0][1]), int(found[0][2])) != (
-                    existing[pair["base"]], existing[pair["quote"]]
+                    existing[pair["base"]],
+                    existing[pair["quote"]],
                 ):
                     raise RuntimeError("Existing pair points at the wrong currencies")
                 print("PASS: reference data exists; rerun FX smoke ingestion.")
@@ -90,8 +95,8 @@ def main() -> None:
                         cur.execute(
                             'INSERT INTO "CURRENCIES" '
                             '("CURRENCY_ID", "CODE", "NAME", "MINOR_UNIT", "IS_ACTIVE") '
-                            'VALUES (%s, %s, %s, %s, TRUE)',
-                            (next_currency, code, currency["name"], currency["minor_unit"])
+                            "VALUES (%s, %s, %s, %s, TRUE)",
+                            (next_currency, code, currency["name"], currency["minor_unit"]),
                         )
                         existing[code] = next_currency
                 cur.execute('SELECT COALESCE(MAX("CURRENCY_PAIR_ID"), 0) FROM "CURRENCY_PAIRS"')
@@ -100,15 +105,17 @@ def main() -> None:
                     'INSERT INTO "CURRENCY_PAIRS" '
                     '("CURRENCY_PAIR_ID", "BASE_CURRENCY_ID", "QUOTE_CURRENCY_ID", '
                     '"SYMBOL", "IS_ACTIVE") VALUES (%s, %s, %s, %s, TRUE)',
-                    (next_pair, existing[pair["base"]], existing[pair["quote"]], args.symbol)
+                    (next_pair, existing[pair["base"]], existing[pair["quote"]], args.symbol),
                 )
                 cur.execute("COMMIT")
             except Exception:
                 cur.execute("ROLLBACK")
                 raise
 
-            cur.execute('SELECT "CURRENCY_PAIR_ID" FROM "CURRENCY_PAIRS" WHERE "SYMBOL" = %s',
-                        (args.symbol,))
+            cur.execute(
+                'SELECT "CURRENCY_PAIR_ID" FROM "CURRENCY_PAIRS" WHERE "SYMBOL" = %s',
+                (args.symbol,),
+            )
             result = cur.fetchall()
             if len(result) != 1:
                 raise RuntimeError("Post-write verification failed")
