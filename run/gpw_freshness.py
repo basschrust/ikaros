@@ -22,7 +22,7 @@ from ingestion.gpw_freshness import (
 
 LOGGER = logging.getLogger(__name__)
 
-QUERY = '''
+QUERY = """
 SELECT
     s."SYMBOL" AS SYMBOL,
     s."NAME" AS NAME,
@@ -35,7 +35,7 @@ LEFT JOIN "PRICES" AS p ON p."SYMBOL" = s."SYMBOL"
 WHERE s."VENUE" = 'GPW'
 GROUP BY s."SYMBOL", s."NAME"
 ORDER BY s."SYMBOL"
-'''
+"""
 
 
 def _as_date(value):
@@ -49,21 +49,33 @@ def build_report(rows, *, expected: date, allowed_lag: int) -> pd.DataFrame:
     for symbol, name, total, first, last, in_period in rows:
         observed = _as_date(last)
         lag = weekdays_behind(observed, expected)
-        results.append({
-            "symbol": str(symbol),
-            "name": name,
-            "total_rows": int(total or 0),
-            "rows_in_period": int(in_period or 0),
-            "first_date": _as_date(first),
-            "last_date": observed,
-            "expected_date": expected,
-            "weekdays_behind": lag,
-            "status": freshness_status(lag, allowed_lag),
-        })
-    return pd.DataFrame(results, columns=[
-        "symbol", "name", "total_rows", "rows_in_period", "first_date", "last_date",
-        "expected_date", "weekdays_behind", "status",
-    ])
+        results.append(
+            {
+                "symbol": str(symbol),
+                "name": name,
+                "total_rows": int(total or 0),
+                "rows_in_period": int(in_period or 0),
+                "first_date": _as_date(first),
+                "last_date": observed,
+                "expected_date": expected,
+                "weekdays_behind": lag,
+                "status": freshness_status(lag, allowed_lag),
+            }
+        )
+    return pd.DataFrame(
+        results,
+        columns=[
+            "symbol",
+            "name",
+            "total_rows",
+            "rows_in_period",
+            "first_date",
+            "last_date",
+            "expected_date",
+            "weekdays_behind",
+            "status",
+        ],
+    )
 
 
 def main() -> None:
@@ -74,10 +86,15 @@ def main() -> None:
     parser.add_argument("--as-of", type=date.fromisoformat, default=date.today())
     parser.add_argument("--period-start", type=date.fromisoformat, default=date(2026, 1, 1))
     parser.add_argument("--max-lag-sessions", type=int, default=0)
-    parser.add_argument("--include-today", action="store_true",
-                        help="Require today's daily candle (normally premature during the session)")
+    parser.add_argument(
+        "--include-today",
+        action="store_true",
+        help="Require today's daily candle (normally premature during the session)",
+    )
     parser.add_argument("--csv", type=Path, help="Optional CSV report path")
-    parser.add_argument("--show", type=int, default=20, help="Number of stale/no-data securities to print")
+    parser.add_argument(
+        "--show", type=int, default=20, help="Number of stale/no-data securities to print"
+    )
     args = parser.parse_args()
     if args.period_start > args.as_of:
         parser.error("--period-start cannot follow --as-of")
@@ -97,12 +114,19 @@ def main() -> None:
         LOGGER.warning("No GPW securities registered in Snowflake")
         return
     counts = report["status"].value_counts().to_dict()
-    LOGGER.info("Expected weekday session: %s (holiday/suspension calendar not yet applied)", expected)
-    LOGGER.info("GPW symbols=%d current=%d stale=%d no_data=%d",
-                len(report), counts.get("CURRENT", 0), counts.get("STALE", 0),
-                counts.get("NO_DATA", 0))
+    LOGGER.info(
+        "Expected weekday session: %s (holiday/suspension calendar not yet applied)", expected
+    )
+    LOGGER.info(
+        "GPW symbols=%d current=%d stale=%d no_data=%d",
+        len(report),
+        counts.get("CURRENT", 0),
+        counts.get("STALE", 0),
+        counts.get("NO_DATA", 0),
+    )
     problems = report.loc[report["status"] != "CURRENT"].sort_values(
-        ["status", "weekdays_behind", "symbol"], ascending=[True, False, True],
+        ["status", "weekdays_behind", "symbol"],
+        ascending=[True, False, True],
         na_position="first",
     )
     if args.show and not problems.empty:

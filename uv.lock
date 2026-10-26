@@ -540,9 +540,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-]
 kafka = [
     { name = "confluent-kafka" },
 ]
@@ -552,6 +549,7 @@ snowflake = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "pytest" },
     { name = "ruff" },
 ]
 
@@ -562,14 +560,16 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26,<3" },
     { name = "openbb", specifier = "==4.7.2" },
     { name = "pandas", specifier = ">=2.2,<3" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8,<10" },
     { name = "pyyaml", specifier = ">=6,<7" },
     { name = "snowflake-connector-python", extras = ["pandas"], marker = "extra == 'snowflake'", specifier = ">=4,<5" },
 ]
-provides-extras = ["snowflake", "dev", "kafka"]
+provides-extras = ["snowflake", "kafka"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "ruff", specifier = ">=0.15.22" }]
+dev = [
+    { name = "pytest", specifier = ">=8,<10" },
+    { name = "ruff", specifier = ">=0.15.22" },
+]
 
 [[package]]
 name = "importlib-metadata"
