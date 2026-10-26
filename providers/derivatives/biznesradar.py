@@ -3,6 +3,7 @@
 Reads a user-supplied HTML snapshot, not a remote website. Uses only Python
 stdlib for parsing; requires pandas, already installed in Ikaros.
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -13,8 +14,13 @@ import re
 import pandas as pd
 
 HEADINGS = {
-    "data": "date", "otwarcie": "open", "max": "high", "min": "low",
-    "zamknięcie": "close", "zamkniecie": "close", "wolumen": "volume",
+    "data": "date",
+    "otwarcie": "open",
+    "max": "high",
+    "min": "low",
+    "zamknięcie": "close",
+    "zamkniecie": "close",
+    "wolumen": "volume",
 }
 FIELDS = ("date", "open", "high", "low", "close", "volume")
 
@@ -84,7 +90,7 @@ def parse_history_html(html: str, *, symbol: str, start: date, end: date) -> pd.
         for i, row in enumerate(table):
             mapping = {HEADINGS.get(cell.lower()): index for index, cell in enumerate(row)}
             if all(field in mapping for field in FIELDS):
-                matched.append([row, *table[i + 1:]])
+                matched.append([row, *table[i + 1 :]])
                 break
     if len(matched) != 1:
         raise ValueError(f"Expected exactly one historical OHLCV table; found {len(matched)}")
@@ -122,6 +128,7 @@ class BiznesRadarProvider:
     Snapshot filenames must be `<contract_symbol>.html`; `get_contracts()`
     deliberately remains unsupported until authoritative metadata is provided.
     """
+
     def __init__(self, snapshot_dir: str | Path):
         self.snapshot_dir = Path(snapshot_dir)
 
@@ -132,5 +139,6 @@ class BiznesRadarProvider:
         if not re.fullmatch(r"[A-Z0-9]+", symbol):
             raise ValueError("Invalid contract symbol")
         path = self.snapshot_dir / f"{symbol}.html"
-        return parse_history_html(path.read_text(encoding="utf-8"), symbol=symbol,
-                                  start=start_date, end=end_date)
+        return parse_history_html(
+            path.read_text(encoding="utf-8"), symbol=symbol, start=start_date, end=end_date
+        )

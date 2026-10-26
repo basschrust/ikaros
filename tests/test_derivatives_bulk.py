@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pandas as pd
 import pytest
 
@@ -16,14 +14,18 @@ def test_price_path_contract(tmp_path):
 
 
 def test_missing_is_reported(tmp_path):
-    data, report = collect(pd.DataFrame({"contract_id": ["FW20Z2620"]}), tmp_path, allow_missing=True)
+    data, report = collect(
+        pd.DataFrame({"contract_id": ["FW20Z2620"]}), tmp_path, allow_missing=True
+    )
     assert data.empty
     assert report[0]["status"] == "MISSING_FILE"
 
 
 def test_invalid_file_is_reported(tmp_path):
     (tmp_path / "FW20Z2620.csv").write_text("contract_id,date,close\nOTHER,2026-10-23,10\n")
-    data, report = collect(pd.DataFrame({"contract_id": ["FW20Z2620"]}), tmp_path, allow_missing=True)
+    data, report = collect(
+        pd.DataFrame({"contract_id": ["FW20Z2620"]}), tmp_path, allow_missing=True
+    )
     assert data.empty
     assert report[0]["status"] == "INVALID"
 

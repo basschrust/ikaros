@@ -1,14 +1,35 @@
 """Validate contract-level daily quotes; no artificial continuous-future stitching."""
+
 from __future__ import annotations
 
-import re
-from datetime import date
 import pandas as pd
 
 TYPES = {"FUTURE", "OPTION"}
 SIDES = {"CALL", "PUT"}
-CONTRACT_COLUMNS = ["contract_id", "symbol", "instrument_type", "underlying_symbol", "expiry_date", "currency", "multiplier", "strike", "option_side", "source"]
-PRICE_COLUMNS = ["contract_id", "date", "open", "high", "low", "close", "volume", "open_interest", "settlement", "source"]
+CONTRACT_COLUMNS = [
+    "contract_id",
+    "symbol",
+    "instrument_type",
+    "underlying_symbol",
+    "expiry_date",
+    "currency",
+    "multiplier",
+    "strike",
+    "option_side",
+    "source",
+]
+PRICE_COLUMNS = [
+    "contract_id",
+    "date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "open_interest",
+    "settlement",
+    "source",
+]
 
 
 def validate_contracts(frame: pd.DataFrame) -> pd.DataFrame:
@@ -16,7 +37,14 @@ def validate_contracts(frame: pd.DataFrame) -> pd.DataFrame:
     if absent:
         raise ValueError(f"Missing contract columns: {sorted(absent)}")
     df = frame[CONTRACT_COLUMNS].copy()
-    for col in ("contract_id", "symbol", "instrument_type", "underlying_symbol", "currency", "source"):
+    for col in (
+        "contract_id",
+        "symbol",
+        "instrument_type",
+        "underlying_symbol",
+        "currency",
+        "source",
+    ):
         if df[col].isna().any() or df[col].astype(str).str.strip().eq("").any():
             raise ValueError(f"Empty {col}")
         df[col] = df[col].astype(str).str.strip()
@@ -59,7 +87,11 @@ def validate_prices(frame: pd.DataFrame, valid_contract_ids: set[str]) -> pd.Dat
             raise ValueError(f"Nonfinite {col}")
     if df["close"].isna().any() or df["close"].le(0).any():
         raise ValueError("Close must be positive")
-    if df["open"].dropna().le(0).any() or df["high"].dropna().le(0).any() or df["low"].dropna().le(0).any():
+    if (
+        df["open"].dropna().le(0).any()
+        or df["high"].dropna().le(0).any()
+        or df["low"].dropna().le(0).any()
+    ):
         raise ValueError("OHLC must be positive")
     if df["volume"].dropna().lt(0).any() or df["open_interest"].dropna().lt(0).any():
         raise ValueError("Negative volume/open interest")

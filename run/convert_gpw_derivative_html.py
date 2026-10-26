@@ -2,6 +2,7 @@
 
 Never performs network requests. CSV is validated using ingestion.derivatives.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -17,8 +18,12 @@ from providers.derivatives.biznesradar import parse_history_html
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--html", required=True, type=Path)
-    parser.add_argument("--contracts", required=True, type=Path,
-                        help="Verified contract specification CSV, same input as existing importer")
+    parser.add_argument(
+        "--contracts",
+        required=True,
+        type=Path,
+        help="Verified contract specification CSV, same input as existing importer",
+    )
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--start", type=date.fromisoformat, required=True)
     parser.add_argument("--end", type=date.fromisoformat, required=True)
@@ -30,20 +35,23 @@ def main() -> None:
     if len(matches) != 1:
         parser.error(f"Expected one contract for symbol {args.symbol} in {args.contracts}")
     contract_id = str(matches.iloc[0]["contract_id"])
-    frame = parse_history_html(args.html.read_text(encoding="utf-8"), symbol=args.symbol,
-                               start=args.start, end=args.end)
-    output = pd.DataFrame({
-        "contract_id": contract_id,
-        "date": frame["date"],
-        "open": frame["open"],
-        "high": frame["high"],
-        "low": frame["low"],
-        "close": frame["close"],
-        "volume": frame["volume"],
-        "open_interest": None,
-        "settlement": None,
-        "source": "biznesradar-html-snapshot",
-    })
+    frame = parse_history_html(
+        args.html.read_text(encoding="utf-8"), symbol=args.symbol, start=args.start, end=args.end
+    )
+    output = pd.DataFrame(
+        {
+            "contract_id": contract_id,
+            "date": frame["date"],
+            "open": frame["open"],
+            "high": frame["high"],
+            "low": frame["low"],
+            "close": frame["close"],
+            "volume": frame["volume"],
+            "open_interest": None,
+            "settlement": None,
+            "source": "biznesradar-html-snapshot",
+        }
+    )
     output = validate_prices(output, {contract_id})
     args.out.parent.mkdir(parents=True, exist_ok=True)
     output.to_csv(args.out, index=False)
