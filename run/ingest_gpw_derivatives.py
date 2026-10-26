@@ -31,24 +31,57 @@ DDL = (
 )
 
 
-def check_references(connection, contracts: pd.DataFrame, *, write: bool) -> None:
-    """Existing IDs must match exactly; avoid silently mutating contract specifications."""
+
+def check_references(
+    connection,
+    contracts: pd.DataFrame,
+    *,
+    write: bool,
+) -> None:
+    """Validate existing contracts and register missing ones."""
+
+    def comparable(value):
+        return None if pd.isna(value) else value
+
     with connection.cursor() as cur:
-        cur.execute('SELECT "CONTRACT_ID", "SYMBOL", "INSTRUMENT_TYPE", "UNDERLYING_SYMBOL", "EXPIRY_DATE", "CURRENCY", "MULTIPLIER", "STRIKE", "OPTION_SIDE", "SOURCE" FROM "DERIVATIVE_CONTRACTS"')
-        current = {r[0]: r[1:] for r in cur.fetchall()}
+        cur.execute(
+            'SELECT "CONTRACT_ID", "SYMBOL", "INSTRUMENT_TYPE", '
+            '"UNDERLYING_SYMBOL", "EXPIRY_DATE", "CURRENCY", '
+            '"MULTIPLIER", "STRIKE", "OPTION_SIDE", "SOURCE" '
+            'FROM "DERIVATIVE_CONTRACTS"'
+        )
+
+        current = {row[0]: row[1:] for row in cur.fetchall()}
+
         for row in contracts.itertuples(index=False, name=None):
-            key, *attrs = row
-            existing = current.get(key)
+            contract_id, *attributes = row
+
+            existing = current.get(contract_id)
+
             if existing is not None:
-                def comparable(value):
-                    return None if pd.isna(value) else value
-                if tuple(map(comparable, existing)) != tuple(map(comparable, attrs)):
-                    raise ValueError(f"Contract specification conflict: {key}")
+                if (
+                    tuple(map(comparable, existing))
+                    != tuple(map(comparable, attributes))
+                ):
+                    raise ValueError(
+                        f"Contract specification conflict: {contract_id}"
+                    )
                 continue
+
             if not write:
-                log.info("NEW CONTRACT %s (%s)", key, attrs[0])
+                log.info("NEW CONTRACT %s", contract_id)
                 continue
-            cur.execute('INSERT INTO "DERIVATIVE_CONTRACTS" ("CONTRACT_ID", "SYMBOL", "INSTRUMENT_TYPE", "UNDERLYING_SYMBOL", "EXPIRY_DATE", "CURRENCY", "MULTIPLIER", "STRIKE", "OPTION_SIDE", "SOURCE") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)', tuple(map(comparable, row)))
+
+            cur.execute(
+                'INSERT INTO "DERIVATIVE_CONTRACTS" '
+                '("CONTRACT_ID", "SYMBOL", "INSTRUMENT_TYPE", '
+                '"UNDERLYING_SYMBOL", "EXPIRY_DATE", "CURRENCY", '
+                '"MULTIPLIER", "STRIKE", "OPTION_SIDE", "SOURCE") '
+                'VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)',
+                tuple(map(comparable, row)),
+            )
+
+            log.info("REGISTERED CONTRACT %s", contract_id)
 
 
 def persist_prices(connection, frame: pd.DataFrame) -> None:
