@@ -1,6 +1,24 @@
-import pandas as pd
 from openbb import obb
 from openbb_core.provider.utils.errors import EmptyDataError
+
+from datetime import date
+
+import pandas as pd
+
+from providers.interface import DerivativesProvider
+
+
+def fetch_futures_history(
+    provider: DerivativesProvider,
+    symbol: str,
+    start_date: date,
+    end_date: date,
+) -> pd.DataFrame:
+    return provider.get_history(
+        symbol=symbol,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
 
 def fetch_eod_futures_prices(

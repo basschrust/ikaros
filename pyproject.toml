@@ -14,11 +14,16 @@ dependencies = [
 
 [project.optional-dependencies]
 snowflake = [
-    # Conservative range for compatibility with Daedalus connector usage.
     "snowflake-connector-python[pandas]>=4,<5",
 ]
+kafka = [
+    "confluent-kafka>=2.6,<3",
+]
+
+[dependency-groups]
 dev = [
     "pytest>=8,<10",
+    "ruff>=0.15.22",
 ]
 
 [tool.uv]
@@ -27,8 +32,3 @@ package = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-
-[dependency-groups]
-dev = [
-    "ruff>=0.15.22",
-]

@@ -30,6 +30,7 @@ wheels/
 
 # Virtual Environment
 .venv/
+.venv_old/
 venv/
 env/
 ENV/
