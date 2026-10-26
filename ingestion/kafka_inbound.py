@@ -1,4 +1,5 @@
 """Stable inbound daily market-data event contract. No Kafka dependency."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -44,21 +45,25 @@ class Observation:
         return f"{self.key}:{self.day.isoformat()}"
 
     def serialize(self) -> bytes:
-        return json.dumps({
-            "version": 1,
-            "dataset": self.dataset,
-            "symbol": self.symbol,
-            "date": self.day.isoformat(),
-            "open": self.open,
-            "high": self.high,
-            "low": self.low,
-            "close": self.close,
-            "volume": self.volume,
-            "dividend": self.dividend,
-            "split_ratio": self.split_ratio,
-            "provider": self.provider,
-            "observation_id": self.observation_id,
-        }, allow_nan=False, separators=(",", ":")).encode("utf-8")
+        return json.dumps(
+            {
+                "version": 1,
+                "dataset": self.dataset,
+                "symbol": self.symbol,
+                "date": self.day.isoformat(),
+                "open": self.open,
+                "high": self.high,
+                "low": self.low,
+                "close": self.close,
+                "volume": self.volume,
+                "dividend": self.dividend,
+                "split_ratio": self.split_ratio,
+                "provider": self.provider,
+                "observation_id": self.observation_id,
+            },
+            allow_nan=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
 
     @classmethod
     def deserialize(cls, payload: bytes) -> "Observation":
@@ -69,11 +74,16 @@ class Observation:
         if not required.issubset(obj):
             raise ValueError(f"Missing fields: {required - set(obj)}")
         event = cls(
-            dataset=obj["dataset"], symbol=obj["symbol"],
+            dataset=obj["dataset"],
+            symbol=obj["symbol"],
             day=date.fromisoformat(obj["date"]),
-            open=obj.get("open"), high=obj.get("high"), low=obj.get("low"),
-            close=obj["close"], volume=obj.get("volume"),
-            dividend=obj.get("dividend"), split_ratio=obj.get("split_ratio"),
+            open=obj.get("open"),
+            high=obj.get("high"),
+            low=obj.get("low"),
+            close=obj["close"],
+            volume=obj.get("volume"),
+            dividend=obj.get("dividend"),
+            split_ratio=obj.get("split_ratio"),
             provider=obj.get("provider", "yfinance"),
         )
         if event.observation_id != obj["observation_id"]:

@@ -6,8 +6,16 @@ from run.kafka_sink import persist_and_commit
 
 
 def sample(**kwargs):
-    values = dict(dataset="FX", symbol="EURPLN=X", day=date(2026, 10, 23),
-                  open=4.20, high=4.30, low=4.10, close=4.25, volume=None)
+    values = dict(
+        dataset="FX",
+        symbol="EURPLN=X",
+        day=date(2026, 10, 23),
+        open=4.20,
+        high=4.30,
+        low=4.10,
+        close=4.25,
+        volume=None,
+    )
     values.update(kwargs)
     return Observation(**values)
 
@@ -26,10 +34,16 @@ def test_ids():
     assert sample().observation_id == "FX:EURPLN=X:2026-10-23"
 
 
-@pytest.mark.parametrize("overrides", [
-    {"dataset": "FOO"}, {"symbol": ""}, {"close": 0.0},
-    {"close": float("nan")}, {"volume": -4.0},
-])
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"dataset": "FOO"},
+        {"symbol": ""},
+        {"close": 0.0},
+        {"close": float("nan")},
+        {"volume": -4.0},
+    ],
+)
 def test_invalid(overrides):
     with pytest.raises(ValueError):
         sample(**overrides)

@@ -1,4 +1,5 @@
 """Create local inbound topics once."""
+
 import os
 from confluent_kafka.admin import AdminClient, NewTopic
 from ingestion.kafka_inbound import TOPICS

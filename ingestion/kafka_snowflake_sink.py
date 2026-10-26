@@ -3,6 +3,7 @@
 The IIC historical batch checkpoint table is intentionally left unchanged:
 stream consumption uses Kafka consumer-group offsets as its progress mechanism.
 """
+
 from __future__ import annotations
 
 from contextlib import closing
@@ -11,8 +12,11 @@ from ingestion.kafka_inbound import Observation
 
 def pair_id(connection, symbol: str) -> int:
     with closing(connection.cursor()) as cur:
-        cur.execute('SELECT "CURRENCY_PAIR_ID" FROM "CURRENCY_PAIRS" '
-                    'WHERE "SYMBOL" = %s AND "IS_ACTIVE" = TRUE', (symbol,))
+        cur.execute(
+            'SELECT "CURRENCY_PAIR_ID" FROM "CURRENCY_PAIRS" '
+            'WHERE "SYMBOL" = %s AND "IS_ACTIVE" = TRUE',
+            (symbol,),
+        )
         ids = [row[0] for row in cur.fetchall()]
     if len(ids) != 1:
         raise ValueError(f"Expected one active FX pair for {symbol}, found {len(ids)}")
@@ -43,8 +47,16 @@ def upsert_observation(connection, event: Observation) -> None:
         WHEN NOT MATCHED THEN INSERT
             ("CURRENCY_PAIR_ID", "SYMBOL", "DATE", "OPEN", "HIGH", "LOW", "CLOSE", "VOLUME")
         VALUES (s.id, s.symbol, s.dt, s.op, s.hi, s.lo, s.cl, s.vol)"""
-        params = (pid, event.symbol, d, event.open, event.high, event.low,
-                  event.close, event.volume)
+        params = (
+            pid,
+            event.symbol,
+            d,
+            event.open,
+            event.high,
+            event.low,
+            event.close,
+            event.volume,
+        )
     elif event.dataset == "GPW":
         sql = """MERGE INTO "PRICES" t USING (
             SELECT %s::VARCHAR AS symbol,
@@ -64,8 +76,17 @@ def upsert_observation(connection, event: Observation) -> None:
         WHEN NOT MATCHED THEN INSERT
             ("SYMBOL", "DATE", "OPEN", "HIGH", "LOW", "CLOSE", "VOLUME", "DIVIDEND", "SPLIT_RATIO")
         VALUES (s.symbol, s.dt, s.op, s.hi, s.lo, s.cl, s.vol, s.dividend, s.split_ratio)"""
-        params = (event.symbol, d, event.open, event.high, event.low, event.close,
-                  event.volume, event.dividend, event.split_ratio)
+        params = (
+            event.symbol,
+            d,
+            event.open,
+            event.high,
+            event.low,
+            event.close,
+            event.volume,
+            event.dividend,
+            event.split_ratio,
+        )
     else:
         raise ValueError(f"Unsupported dataset: {event.dataset}")
     with closing(connection.cursor()) as cur:

@@ -1,4 +1,5 @@
 """Consume inbound Kafka observations into Snowflake; commit offset after MERGE."""
+
 from __future__ import annotations
 
 import argparse
@@ -28,6 +29,7 @@ def main():
     from confluent_kafka import Consumer, KafkaException
     from config.config import load_config
     from database.repositories.factory import repository_from_config
+
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--dataset", choices=sorted(TOPICS), default="FX")
     p.add_argument("--group", default="ikaros-snowflake-inbound-v1")
@@ -39,11 +41,15 @@ def main():
     config = load_config("database.yaml")
     if config.get("database", {}).get("driver", "").lower() != "snowflake":
         p.error("Select Snowflake as database driver")
-    client = Consumer({
-        "bootstrap.servers": os.getenv("IKAROS_KAFKA_BROKERS", "localhost:9092"),
-        "group.id": args.group, "auto.offset.reset": "earliest",
-        "enable.auto.commit": False, "enable.auto.offset.store": False,
-    })
+    client = Consumer(
+        {
+            "bootstrap.servers": os.getenv("IKAROS_KAFKA_BROKERS", "localhost:9092"),
+            "group.id": args.group,
+            "auto.offset.reset": "earliest",
+            "enable.auto.commit": False,
+            "enable.auto.offset.store": False,
+        }
+    )
     client.subscribe([TOPICS[args.dataset]])
     processed = 0
     try:
