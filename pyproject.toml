@@ -10,6 +10,8 @@ dependencies = [
     "PyYAML>=6,<7",
     # Existing ingestion uses OpenBB v4 provider-specific API.
     "openbb==4.7.2",
+    "requests>=2.34.2",
+    "beautifulsoup4>=4.15.0",
 ]
 
 [project.optional-dependencies]
