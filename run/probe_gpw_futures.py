@@ -1,4 +1,5 @@
 """Probe OpenBB coverage for explicitly supplied GPW futures tickers; never writes DB."""
+
 import argparse
 from datetime import date
 
@@ -14,8 +15,11 @@ def main():
     for symbol in args.symbols:
         try:
             result = obb.derivatives.futures.historical(
-                symbol=symbol, start_date=args.start, end_date=args.end,
-                interval="1d", provider="yfinance"
+                symbol=symbol,
+                start_date=args.start,
+                end_date=args.end,
+                interval="1d",
+                provider="yfinance",
             )
             frame = result.to_dataframe()
             print(symbol, "rows=", len(frame), "columns=", list(frame.columns))
