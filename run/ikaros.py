@@ -4,15 +4,15 @@ Use: uv run --extra kafka --extra snowflake python -m run.ikaros <command>
 
 Existing ingestion modules remain the implementation layer.
 """
+
 from __future__ import annotations
 
 import argparse
 import os
-import signal
 import subprocess
 import sys
 import time
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -53,8 +53,12 @@ def bootstrap() -> None:
     checked(command("run.kafka_discovery_topic"), env=env)
 
 
-def job_commands(*, fx_symbols: list[str], gpw_limit: int | None, days: int) -> dict[str, list[str]]:
-    scheduler = command("run.ikaros_scheduler", "--write", "--days", str(days), "--fx-symbols", *fx_symbols)
+def job_commands(
+    *, fx_symbols: list[str], gpw_limit: int | None, days: int
+) -> dict[str, list[str]]:
+    scheduler = command(
+        "run.ikaros_scheduler", "--write", "--days", str(days), "--fx-symbols", *fx_symbols
+    )
     if gpw_limit is not None:
         scheduler += ["--gpw-limit", str(gpw_limit)]
     return {
@@ -97,14 +101,24 @@ def supervise(jobs: dict[str, list[str]], *, env: dict[str, str]) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Ikaros: one entry point for market data operations")
+    parser = argparse.ArgumentParser(
+        description="Ikaros: one entry point for market data operations"
+    )
     sub = parser.add_subparsers(dest="action", required=True)
-    sub.add_parser("setup", help="Start Docker Kafka and create topics (Python deps must already be installed)")
-    start = sub.add_parser("start", help="Start Kafka, sinks and scheduler in one foreground process")
+    sub.add_parser(
+        "setup", help="Start Docker Kafka and create topics (Python deps must already be installed)"
+    )
+    start = sub.add_parser(
+        "start", help="Start Kafka, sinks and scheduler in one foreground process"
+    )
     start.add_argument("--fx-symbols", nargs="+", default=["EURPLN=X"])
-    start.add_argument("--gpw-limit", type=int, default=None, help="Pilot only; default all registered stocks")
+    start.add_argument(
+        "--gpw-limit", type=int, default=None, help="Pilot only; default all registered stocks"
+    )
     start.add_argument("--days", type=int, default=7)
-    backfill = sub.add_parser("backfill", help="GPW historical catch-up through IIC (idempotent insert-only)")
+    backfill = sub.add_parser(
+        "backfill", help="GPW historical catch-up through IIC (idempotent insert-only)"
+    )
     backfill.add_argument("--start", type=date.fromisoformat, required=True)
     backfill.add_argument("--end", type=date.fromisoformat, required=True)
     backfill.add_argument("--limit", type=int)
@@ -117,20 +131,32 @@ def main(argv: list[str] | None = None) -> None:
         if args.days < 1 or (args.gpw_limit is not None and args.gpw_limit < 1):
             parser.error("--days and --gpw-limit must be positive")
         bootstrap()
-        supervise(job_commands(fx_symbols=args.fx_symbols, gpw_limit=args.gpw_limit, days=args.days),
-                  env=runtime_environment())
+        supervise(
+            job_commands(fx_symbols=args.fx_symbols, gpw_limit=args.gpw_limit, days=args.days),
+            env=runtime_environment(),
+        )
     elif args.action == "backfill":
         if args.start > args.end:
             parser.error("--start must not follow --end")
         if args.limit is not None and args.limit < 1:
             parser.error("--limit must be positive")
-        cmd = command("run.backfill_gpw_snowflake", "--start", args.start.isoformat(),
-                      "--end", args.end.isoformat(), "--write", "--continue-on-error")
+        cmd = command(
+            "run.backfill_gpw_snowflake",
+            "--start",
+            args.start.isoformat(),
+            "--end",
+            args.end.isoformat(),
+            "--write",
+            "--continue-on-error",
+        )
         if args.limit is not None:
             cmd.extend(["--limit", str(args.limit)])
         checked(cmd, env=runtime_environment())
     elif args.action == "status":
-        checked(command("run.gpw_freshness", "--csv", "output/gpw_freshness.csv"), env=runtime_environment())
+        checked(
+            command("run.gpw_freshness", "--csv", "output/gpw_freshness.csv"),
+            env=runtime_environment(),
+        )
         checked(command("run.iic_status", "--failed-only"), env=runtime_environment())
     elif args.action == "stop-broker":
         checked(docker_compose("down"), env=runtime_environment())

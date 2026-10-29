@@ -3,6 +3,7 @@
 No registration to DERIVATIVE_CONTRACTS. An empty/stale source is a failure,
 not evidence that active contracts have disappeared.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -21,7 +22,9 @@ OPTIONS_URL = "https://www.money.pl/gielda/gpw/opcje/"
 
 
 def load(url: str) -> str:
-    response = requests.get(url, timeout=25, headers={"User-Agent": "IkarosResearch/1.0 (+manual-source-review)"})
+    response = requests.get(
+        url, timeout=25, headers={"User-Agent": "IkarosResearch/1.0 (+manual-source-review)"}
+    )
     response.raise_for_status()
     return response.text
 
@@ -30,6 +33,7 @@ def run(*, publish: bool, snapshot_futures: str | None = None, snapshot_options:
     def read(url, path):
         if path:
             from pathlib import Path
+
             return Path(path).read_text(encoding="utf-8")
         return load(url)
 
@@ -38,22 +42,32 @@ def run(*, publish: bool, snapshot_futures: str | None = None, snapshot_options:
     options = parse_money_options(read(OPTIONS_URL, snapshot_options), as_of=stamp)
     candidates = futures + options
     if not candidates:
-        raise RuntimeError("No derivatives candidates found: source may have changed; refusing empty update")
+        raise RuntimeError(
+            "No derivatives candidates found: source may have changed; refusing empty update"
+        )
     LOG.info("Candidates: futures=%d options=%d publish=%s", len(futures), len(options), publish)
     if not publish:
         for c in candidates[:15]:
             LOG.info("CANDIDATE %s %s expiry=%s", c.instrument_type, c.symbol, c.expiry_date)
         return
     from confluent_kafka import Producer
-    producer = Producer({"bootstrap.servers": os.getenv("IKAROS_KAFKA_BROKERS", "127.0.0.1:9092"),
-                         "enable.idempotence": True, "acks": "all"})
+
+    producer = Producer(
+        {
+            "bootstrap.servers": os.getenv("IKAROS_KAFKA_BROKERS", "127.0.0.1:9092"),
+            "enable.idempotence": True,
+            "acks": "all",
+        }
+    )
     failures = []
     ack = []
+
     def delivered(err, msg):
         if err:
             failures.append(str(err))
         else:
             ack.append(msg.offset())
+
     for c in candidates:
         producer.produce(TOPIC, key=c.symbol.encode(), value=c.encode(), on_delivery=delivered)
         producer.poll(0)

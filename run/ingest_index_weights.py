@@ -3,6 +3,7 @@
 Historical snapshots are versioned as inclusive [VALID_FROM, VALID_TO] periods.
 Dry-run by default. No table DDL is performed.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -37,8 +38,12 @@ def load_snapshot(path: Path) -> tuple[date, str, list[dict]]:
     if abs(sum(weights) - Decimal("100")) > Decimal("0.20"):
         raise ValueError(f"Weight total {sum(weights)}% is inconsistent with 100%")
     parsed = [
-        {"ticker": ticker, "weight_pct": weight, "source": row["source"].strip(),
-         "source_url": row["source_url"].strip()}
+        {
+            "ticker": ticker,
+            "weight_pct": weight,
+            "source": row["source"].strip(),
+            "source_url": row["source_url"].strip(),
+        }
         for ticker, weight, row in zip(tickers, weights, rows)
     ]
     return dates.pop(), "WIG20", parsed
@@ -114,8 +119,14 @@ def persist(conn, as_of: date, index: str, rows: list[dict]) -> None:
                 '"VALID_FROM", "VALID_TO", "SOURCE") VALUES (%s,%s,%s,%s,%s,%s)'
             )
             params = [
-                (index, r["security_symbol"], float(r["weight_pct"] / Decimal(100)),
-                 as_of, end, attribution)
+                (
+                    index,
+                    r["security_symbol"],
+                    float(r["weight_pct"] / Decimal(100)),
+                    as_of,
+                    end,
+                    attribution,
+                )
                 for r in rows
             ]
             cur.executemany(insert, params)
@@ -131,7 +142,7 @@ def main() -> None:
     parser.add_argument("--write", action="store_true", help="Persist in existing Snowflake table")
     args = parser.parse_args()
     as_of, index, rows = load_snapshot(args.csv)
-    print(f'{index} {as_of}: {len(rows)} constituents; {sum(x["weight_pct"] for x in rows)}%')
+    print(f"{index} {as_of}: {len(rows)} constituents; {sum(x['weight_pct'] for x in rows)}%")
     if not args.write:
         print("DRY RUN: CSV validated; Snowflake unchanged")
         return
