@@ -539,6 +539,7 @@ dependencies = [
     { name = "pandas" },
     { name = "pyyaml" },
     { name = "requests" },
+    { name = "yfinance" },
 ]
 
 [package.optional-dependencies]
@@ -566,6 +567,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6,<7" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "snowflake-connector-python", extras = ["pandas"], marker = "extra == 'snowflake'", specifier = ">=4,<5" },
+    { name = "yfinance", specifier = ">=0.2,<2" },
 ]
 provides-extras = ["snowflake", "kafka"]
 

@@ -12,6 +12,7 @@ dependencies = [
     "openbb==4.7.2",
     "requests>=2.34.2",
     "beautifulsoup4>=4.15.0",
+    "yfinance>=0.2,<2",
 ]
 
 [project.optional-dependencies]

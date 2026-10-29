@@ -2,19 +2,33 @@
 
 Does not infer contractual specifications or promote records to DERIVATIVE_CONTRACTS.
 """
+
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-MONTHS = {"F": 1, "G": 2, "H": 3, "J": 4, "K": 5, "M": 6,
-          "N": 7, "Q": 8, "U": 9, "V": 10, "X": 11, "Z": 12}
-CURRENCY = {"FCHF": "CHFPLN=X", "FEUR": "EURPLN=X",
-            "FGBP": "GBPPLN=X", "FUSD": "USDPLN=X"}
+MONTHS = {
+    "F": 1,
+    "G": 2,
+    "H": 3,
+    "J": 4,
+    "K": 5,
+    "M": 6,
+    "N": 7,
+    "Q": 8,
+    "U": 9,
+    "V": 10,
+    "X": 11,
+    "Z": 12,
+}
+CURRENCY = {"FCHF": "CHFPLN=X", "FEUR": "EURPLN=X", "FGBP": "GBPPLN=X", "FUSD": "USDPLN=X"}
 INDEX = {"FW20": "WIG20", "FW40": "mWIG40"}
 # The optional terminal '20' is specific to WIG20 contract identifiers.
-PATTERN = re.compile(r"^(?P<family>F[A-Z0-9]{3})(?P<month>[FGHJKMNQUVXZ])(?P<year>\d{2})(?P<suffix>20)?$")
+PATTERN = re.compile(
+    r"^(?P<family>F[A-Z0-9]{3})(?P<month>[FGHJKMNQUVXZ])(?P<year>\d{2})(?P<suffix>20)?$"
+)
 
 
 @dataclass(frozen=True)
@@ -40,16 +54,35 @@ def review(symbol: str, expiry: date | None, *, as_of: date | None = None) -> Ca
     symbol = symbol.strip().upper()
     m = PATTERN.fullmatch(symbol)
     if not m:
-        return CandidateReview(symbol, None, "UNKNOWN", None, None, expiry, None,
-                               None, "REVIEW", "Unrecognized symbol syntax")
+        return CandidateReview(
+            symbol,
+            None,
+            "UNKNOWN",
+            None,
+            None,
+            expiry,
+            None,
+            None,
+            "REVIEW",
+            "Unrecognized symbol syntax",
+        )
     family, letter, year_code, suffix = m.group("family", "month", "year", "suffix")
     year = 2000 + int(year_code)
     month = MONTHS[letter]
     kind = "INDEX" if family in INDEX else "CURRENCY" if family in CURRENCY else "EQUITY_CANDIDATE"
     if suffix is not None and family != "FW20":
-        return CandidateReview(symbol, family, kind, None, f"{year:04d}-{month:02d}",
-                               expiry, third_friday(year, month), False, "REVIEW",
-                               "Unexpected numeric suffix")
+        return CandidateReview(
+            symbol,
+            family,
+            kind,
+            None,
+            f"{year:04d}-{month:02d}",
+            expiry,
+            third_friday(year, month),
+            False,
+            "REVIEW",
+            "Unexpected numeric suffix",
+        )
     expected = third_friday(year, month)
     hint = INDEX.get(family) or CURRENCY.get(family)
     if kind == "EQUITY_CANDIDATE":
@@ -63,6 +96,15 @@ def review(symbol: str, expiry: date | None, *, as_of: date | None = None) -> Ca
         reasons.append("Source expiry differs from standard third Friday; check GPW calendar")
     if as_of is not None and expiry is not None and expiry < as_of:
         reasons.append("Expired as of reference date")
-    return CandidateReview(symbol, family, kind, hint, f"{year:04d}-{month:02d}",
-                           expiry, expected, expiry == expected if expiry else None,
-                           "REVIEW", "; ".join(reasons))
+    return CandidateReview(
+        symbol,
+        family,
+        kind,
+        hint,
+        f"{year:04d}-{month:02d}",
+        expiry,
+        expected,
+        expiry == expected if expiry else None,
+        "REVIEW",
+        "; ".join(reasons),
+    )

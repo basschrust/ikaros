@@ -1,113 +1,104 @@
-# Ikaros 🪽 — Market Data Ingestion
+# Ikaros 🪽 — Market-data ingestion for Daedalus
 
-**OpenBB / Yahoo Finance → Ikaros collectors → Kafka → Ikaros consumers → Snowflake (`DAEDALUS.MARKET_DATA`)**
+**Public interface: `run.ikaros`.** The older `run/*.py` files are implementation modules; operators normally don't call them.
 
-Ikaros maintains daily GPW equity prices and FX rates in Snowflake for Daedalus. It also discovers GPW derivative **candidates**; discovery is **not** the same as verified contract registration or derivative-price ingestion.
+```text
+OpenBB / GPW listings → Collectors → Local Kafka → Snowflake sinks → DAEDALUS.MARKET_DATA
+                                                            ↓
+                                                    Analytics SQL task
+                                                            ↓
+                                                         Daedalus
+```
 
-## Quick start (Windows 10/11, PowerShell)
+## First-time setup (Windows, PowerShell)
 
-**Prerequisites (once):** Install [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/) with Linux containers/WSL 2, [uv](https://docs.astral.sh/uv/), and Python 3.12 (uv can install Python). Docker Desktop must be running and your Windows account must have permission to use it. Ensure `config/database.yaml` selects the Snowflake driver and configure the `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, and (for password authentication) `SNOWFLAKE_PASSWORD` environment variables outside Git. Alternative authentication must match `config/database.yaml`. **Never commit credentials.** The Snowflake role must have permission to read reference tables and write observations and control tables. The repository must include `run/ikaros_scheduler.py`, `run/kafka_contract_sink.py`, and `run/kafka_discovery_topic.py` from the scheduler extension.
-
-### Two launches
-
-1. **One-time installation:** Double-click **`setup-ikaros.cmd`** in the repository root. It installs the Python environment, starts the local Kafka broker, creates Kafka topics and checks connectivity. It does **not** run a full historical backfill or silently seed new securities.
-2. **Start the engine:** Double-click **`start-ikaros.cmd`**. It starts the Kafka broker (if needed), FX and GPW Snowflake sinks, the derivatives discovery sink, and the ingestion scheduler in **separate Windows terminal windows**. Leave these windows open. Start only **one** scheduler instance. The launcher also starts a separate GPW catch-up window for the last 7 calendar days, with IIC-backed idempotent inserts, to help close recent gaps.
-
-These are two local *launch actions*, not unattended provisioning of Docker, Snowflake credentials, provider permissions or the instrument universe. **The scheduled collectors require an existing seeded universe.** First-time data setup is described below.
-
-### One-time data seeding (on a fresh Snowflake schema)
-
-In PowerShell from the repository root:
+Prerequisites: Python 3.12 via [uv](https://docs.astral.sh/uv/), Docker Desktop running with Linux containers and appropriate permissions, network access to Snowflake, and environment variables `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PASSWORD` for password authentication. `config/database.yaml` must select `snowflake`. Never commit secrets. The same Snowflake schema must already contain the instrument reference data (`SECURITIES`, `CURRENCY_PAIRS`). For a fresh database, see **Bootstrap reference data** below.
 
 ```powershell
-# Register GPW stocks from data/gpw_stocks.csv (ticker,name columns)
-uv run --extra snowflake python -m run.seed_gpw_snowflake --write
-
-# Register FX currency/pair reference data using the scripts already supplied with Ikaros.
-# Review their supported flags first:
-uv run --extra snowflake python -m run.seed_fx_reference --help
+uv sync --python 3.12 --extra kafka --extra snowflake
+uv run --no-sync python -m run.ikaros setup
 ```
 
-Confirm `SECURITIES` and `CURRENCY_PAIRS` are populated before enabling full collection. The scheduler defaults to `EURPLN=X` for FX unless `--fx-symbols` is configured. To collect your **entire supported direct FX universe**, edit the `FX_SYMBOLS` list in `tools/start-ikaros.ps1` to include the direct Yahoo-supported pairs seeded in Snowflake. **Do not include derived pairs unavailable from Yahoo**; calculate them using the cross-currency module.
+This initializes Kafka and topics; it **does not** run historical backfills or create reference securities. Docker Desktop must be started by the user; the script cannot bypass Docker permission requirements.
 
-### First historical load
-
-On a new database, run this **once**, separately from the recurring 7-day catch-up:
+## Run the engine (one command)
 
 ```powershell
-uv run --extra snowflake python -m run.backfill_gpw_snowflake --start 2020-01-01 --end 2026-10-27 --write --continue-on-error
+uv run --no-sync python -m run.ikaros start
 ```
 
-Adjust `--end` to the most recently **completed** GPW trading date. IIC checkpoints successful exact symbol/date-window batches; historical backfill merges missing observations without overwriting preexisting rows. Avoid running the full backfill simultaneously with the streaming sink until you understand concurrency. For FX, use the existing `run.backfill_fx_snowflake` utility for supported registered pairs.
+Keep this terminal open. **Ctrl+C stops the scheduler and three consumers**; Kafka remains running and keeps its data. Run **only one** copy of the engine; do not simultaneously use `start-ikaros.cmd` or open duplicate sink windows. Logs from all children appear together. On unexpected child failure, the supervisor stops the remaining processes instead of allowing a partially healthy pipeline to run unnoticed.
 
-## Running manually / troubleshooting
+Default schedules (implemented by the existing `run.ikaros_scheduler`):
 
-If you prefer explicit PowerShell windows, start the following **in order**:
+| Job | Interval | Output |
+| --- | --- | --- |
+| FX collector | 5 minutes | `FX_RATES` via Kafka |
+| GPW equity collector | 15 minutes | `PRICES` via Kafka |
+| Derivative contract discovery | 6 hours | `DERIVATIVE_CANDIDATES` via Kafka |
+
+The default FX pair is `EURPLN=X`; **all** registered GPW equities are included. Override FX pairs with `--fx-symbols EURPLN=X USDPLN=X EURUSD=X`, using only provider-supported direct quotes. For a 3-stock pilot append `--gpw-limit 3`.
+
+The discovery stream stores **candidates**, not verified contracts or option/future price histories. The stock analytics Snowflake task runs separately, provided it has been created and resumed. Kafka polling alone does not guarantee a finalized daily candle, a working exchange calendar, or that every security trades every day.
+
+## Status and catch-up
+
+Read-only freshness and failure reports:
 
 ```powershell
-# Broker and topics (once per broker initialization)
-docker compose -f compose.kafka.yaml up -d
-uv run --extra kafka python -m run.kafka_inbound_topics
-uv run --extra kafka python -m run.kafka_discovery_topic
-
-# Separate, continuously running consoles (each command blocks)
-uv run --extra kafka --extra snowflake python -m run.kafka_sink --dataset FX
-uv run --extra kafka --extra snowflake python -m run.kafka_sink --dataset GPW
-uv run --extra kafka --extra snowflake python -m run.kafka_contract_sink
-uv run --extra kafka --extra snowflake python -m run.ikaros_scheduler --write
+uv run --no-sync python -m run.ikaros status
 ```
 
-The standard schedule is **FX every 5 minutes**, **GPW equities every 15 minutes**, **derivative candidate discovery every 6 hours**. A full GPW round can take *longer* than 15 minutes; actual freshness depends on the provider, the number of symbols and Snowflake availability. Polling daily EoD data does not create a real-time quote feed. Collectors may fetch and publish overlapping historical candles again; Snowflake sinks must remain idempotent.
+This prints the weekday-based freshness report and writes `output/gpw_freshness.csv`; it also displays failed IIC batches. GPW holidays, trading suspensions and newly listed securities can legitimately create gaps.
 
-### Check freshness and missing observations
+If completed sessions are missing, use the backfill command with explicit **inclusive** dates; run it outside concurrent full-scale ingestion where possible:
 
 ```powershell
-uv run --extra snowflake python -m run.gpw_freshness --csv output/gpw_freshness.csv
-uv run --extra snowflake python -m run.iic_status --failed-only
+uv run --no-sync python -m run.ikaros backfill --start 2026-10-26 --end 2026-10-27
 ```
 
-The freshness monitor uses weekdays, **not** the official GPW holiday/suspension calendar; some instruments legitimately have no trade on a session. A stale row does not by itself prove the pipeline failed. Yesterday's candle may become available late from the provider. The one-week catch-up is useful for gaps but **does not overwrite an existing partial EoD price**; verify candle finality before using data for Daedalus.
+Backfill is **insert-only** for missing GPW `(symbol,date)` observations. It cannot correct an already-stored preliminary candle. Streaming sinks may refresh observations; check finality before using values in Daedalus. IIC considers exact date windows separate batches.
 
-For a specific missing completed day, use:
+To stop only the Kafka server after shutting down Ikaros:
 
 ```powershell
-uv run --extra snowflake python -m run.backfill_gpw_snowflake --start 2026-10-26 --end 2026-10-26 --write --continue-on-error
+uv run --no-sync python -m run.ikaros stop-broker
 ```
 
-Replace the dates. For failed batches, inspect IIC before retrying; `--iic-force` forces a recheck but does not update existing price rows in the historical backfill.
+Do **not** use `docker compose down -v` unless you intend to delete broker messages and consumer offsets.
 
-### Verify in Snowflake
+## Bootstrap reference data (fresh Snowflake only)
 
-```sql
-SELECT TO_DATE("DATE") AS SESSION_DATE,
-       COUNT(DISTINCT "SYMBOL") AS EQUITIES,
-       COUNT(*) AS OBSERVATIONS
-FROM DAEDALUS.MARKET_DATA.PRICES
-WHERE "DATE" >= DATEADD(day, -10, CURRENT_DATE())
-GROUP BY 1 ORDER BY 1 DESC;
-```
-
-### Stop and restart
-
-Close the four running process windows or use Ctrl+C in each. Stop Kafka (keep data):
+Do not do this on every launch. Seed GPW securities with a real `data/gpw_stocks.csv` file containing `ticker,name`:
 
 ```powershell
-docker compose -f compose.kafka.yaml down
+uv run --no-sync python -m run.seed_gpw_snowflake --write
+uv run --no-sync python -m run.seed_fx_reference --help
 ```
 
-**Do not use `down -v`** unless you intentionally want to delete Kafka messages/offsets. The PowerShell launchers do not create a Windows service; to remain live, Docker Desktop and the collector/sink windows must keep running. They are suitable for development on a workstation, not a production high-availability deployment.
+Review the FX seed CLI's options before writing currency reference data. Initial years of historical GPW data can be loaded using the `backfill` command with the required period. This is separate from the recurring Kafka collector.
 
-### Common problems
+## System boundaries
 
-| Symptom | Check |
-| --- | --- |
-| `docker_engine` pipe not found | Start Docker Desktop; check Docker permissions and `docker info` |
-| Kafka IPv6 `::1:9092` connection errors | Use `IKAROS_KAFKA_BROKERS=127.0.0.1:9092` and the IPv4 advertised listener in `compose.kafka.yaml` |
-| `No module named pytest` | `uv sync --extra kafka --extra snowflake`, then `make test` (or `uv run python -m pytest -q tests`) |
-| GPW data one or two sessions old | Run freshness monitor, then short catch-up; investigate provider gaps, holidays, suspensions |
-| No FX symbols besides EURPLN | Set `FX_SYMBOLS` in `tools/start-ikaros.ps1` and seed the reference pairs |
-| Derivative candidates present but no prices | Discovery only stages candidates; contract verification and a quotation source are still required |
+- `run/ikaros.py` — operator CLI and foreground process supervisor (this package).
+- `run/ikaros_scheduler.py` — cadence and collector orchestration.
+- `run/kafka_collect.py`, `run/kafka_discover_contracts.py` — provider polling and Kafka publication.
+- `run/kafka_sink.py`, `run/kafka_contract_sink.py` — Kafka consumers and Snowflake persistence.
+- `ingestion/` — transformations, validation, IIC and freshness calculations.
+- `providers/` — provider-specific adapters.
+- `database/` — DuckDB/Snowflake connectors.
+- `sql/stock_analytics/` — optional analytical layer and separate Snowflake task.
 
-For developer validation: `make test` and `make lint-check`.
+Legacy `run/*` command-line scripts stay present for tests, migration, recovery and debugging. Don't delete them until regression tests cover the new entry point. Existing Windows setup/start launchers remain **legacy alternatives**; use the unified CLI instead, not both.
 
-**Current limitation:** This README and launchers simplify local operation; they do not guarantee 100% fresh daily data across every listed or suspended security, nor complete GPW derivative price coverage.
+## Diagnostics
+
+```powershell
+make test
+make lint-check
+docker compose -f compose.kafka.yaml ps
+```
+
+For Kafka IPv6 errors, use `127.0.0.1:9092` in `IKAROS_KAFKA_BROKERS` and the Kafka advertised listener. If `make test` says pytest is missing, run `uv sync --extra kafka --extra snowflake` (pytest is in the development dependency group). Your Snowflake credentials must be present in the **process environment**; the CLI does not read or create a `.env` file.
+
+**Deployment note:** This is a local single-node Kafka development workflow, not a fault-tolerant production service. A daily price may be older than the most recent session because it wasn't traded or because the provider hasn't published it yet.

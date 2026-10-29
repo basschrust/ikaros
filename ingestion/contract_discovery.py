@@ -1,4 +1,5 @@
 """Candidate GPW derivatives listing parser. Discovery is not contract registration."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
@@ -29,7 +30,10 @@ class Candidate:
         if obj.pop("version", None) != 1:
             raise ValueError("Unsupported candidate schema version")
         candidate = cls(**obj)
-        if not SYMBOL.fullmatch(candidate.symbol) or candidate.instrument_type not in {"FUTURE", "OPTION"}:
+        if not SYMBOL.fullmatch(candidate.symbol) or candidate.instrument_type not in {
+            "FUTURE",
+            "OPTION",
+        }:
             raise ValueError("Invalid candidate")
         if candidate.expiry_date is not None:
             date.fromisoformat(candidate.expiry_date)

@@ -1,4 +1,5 @@
 """Export a no-write registry review of current Snowflake DERIVATIVE_CANDIDATES."""
+
 from __future__ import annotations
 
 import argparse
@@ -23,8 +24,11 @@ def main() -> None:
         parser.error("Select snowflake database driver")
     with repository_from_config(config) as repo:
         with closing(repo.connection.cursor()) as cur:
-            cur.execute('SELECT "SYMBOL", "EXPIRY_DATE" FROM "DERIVATIVE_CANDIDATES" '
-                        'WHERE "INSTRUMENT_TYPE" = %s ORDER BY "SYMBOL"', ("FUTURE",))
+            cur.execute(
+                'SELECT "SYMBOL", "EXPIRY_DATE" FROM "DERIVATIVE_CANDIDATES" '
+                'WHERE "INSTRUMENT_TYPE" = %s ORDER BY "SYMBOL"',
+                ("FUTURE",),
+            )
             rows = cur.fetchall()
     reviews = []
     for symbol, expiry in rows:
@@ -44,8 +48,18 @@ def main() -> None:
     print("All entries intentionally require reference-data verification before promotion.")
 
 
-COLUMNS = ("symbol", "family", "category", "underlying_hint", "contract_month",
-           "reported_expiry", "third_friday", "expiry_consistent", "status", "reason")
+COLUMNS = (
+    "symbol",
+    "family",
+    "category",
+    "underlying_hint",
+    "contract_month",
+    "reported_expiry",
+    "third_friday",
+    "expiry_consistent",
+    "status",
+    "reason",
+)
 
 if __name__ == "__main__":
     main()
