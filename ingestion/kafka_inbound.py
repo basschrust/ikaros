@@ -31,10 +31,17 @@ class Observation:
             raise ValueError("day must be date")
         for name in ("open", "high", "low", "close", "volume", "dividend", "split_ratio"):
             number = getattr(self, name)
-            if number is not None and not math.isfinite(float(number)):
-                raise ValueError(f"Non-finite {name}")
-        if self.close <= 0 or (self.volume is not None and self.volume < 0):
-            raise ValueError("Invalid close or volume")
+            if number is not None:
+                try:
+                    valid = math.isfinite(float(number))
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError(f"Invalid {name}") from exc
+                if not valid:
+                    raise ValueError(f"Non-finite {name}")
+        if self.close is None or self.close <= 0:
+            raise ValueError("Invalid close: must be positive and non-null")
+        if self.volume is not None and self.volume < 0:
+            raise ValueError("Invalid volume")
 
     @property
     def key(self):
