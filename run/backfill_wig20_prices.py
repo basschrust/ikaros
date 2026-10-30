@@ -10,6 +10,7 @@ Stooq may require an API key or a manual browser download. We do not
 attempt to bypass access controls. Set STOOQ_API_KEY in a gitignored .env
 or use --csv with a downloaded, authorized CSV.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -41,10 +42,16 @@ def validate_csv_response(content: str, content_type: str = "") -> str:
     """Never treat provider HTML, quota notices or denial text as CSV."""
     first = content.lstrip("\ufeff \r\n\t")[:350].lower()
     ctype = content_type.lower()
-    if ("html" in ctype or first.startswith(("<", "<!doctype"))
-            or "access denied" in first or "unauthorized" in first
-            or "exceeded the daily" in first or "uzyskaj apikey" in first
-            or "apikey" in first and ("get_apikey" in first or "captcha" in first)):
+    if (
+        "html" in ctype
+        or first.startswith(("<", "<!doctype"))
+        or "access denied" in first
+        or "unauthorized" in first
+        or "exceeded the daily" in first
+        or "uzyskaj apikey" in first
+        or "apikey" in first
+        and ("get_apikey" in first or "captcha" in first)
+    ):
         raise RuntimeError(
             "Stooq denied CSV download or returned an HTML/key/quota page. "
             "Obtain authorized access at " + STOOQ_KEY_PAGE + " and set STOOQ_API_KEY, "
@@ -72,14 +79,18 @@ def fetch_csv(start: date, end: date, *, timeout: int = 60, api_key: str | None 
         params["apikey"] = api_key
     try:
         response = requests.get(
-            STOOQ_URL, params=params, timeout=timeout,
+            STOOQ_URL,
+            params=params,
+            timeout=timeout,
             headers={"User-Agent": "Ikaros/1.0 historical-index-backfill"},
         )
         response.raise_for_status()
-    except requests.RequestException as exc:
+    except requests.RequestException:
         # Do not leak an API key from a requests exception or its URL.
-        raise RuntimeError("Stooq download failed (HTTP/network). Check authorized access "
-                           "or use --csv PATH. No data was written.") from None
+        raise RuntimeError(
+            "Stooq download failed (HTTP/network). Check authorized access "
+            "or use --csv PATH. No data was written."
+        ) from None
     return validate_csv_response(response.text, response.headers.get("Content-Type", ""))
 
 
@@ -87,7 +98,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--start", type=date.fromisoformat, default=date(1994, 1, 1))
     parser.add_argument(
-        "--end", type=date.fromisoformat,
+        "--end",
+        type=date.fromisoformat,
         default=datetime.now(ZoneInfo("Europe/Warsaw")).date() - timedelta(days=1),
     )
     parser.add_argument("--csv", type=Path, help="Authorized local Stooq WIG20 daily CSV")
@@ -102,12 +114,15 @@ def main() -> None:
         content = validate_csv_response(args.csv.read_text(encoding="utf-8-sig"))
         origin = f"local CSV {args.csv}"
     else:
-        content = fetch_csv(args.start, args.end, timeout=args.timeout,
-                            api_key=read_key_from_environment())
+        content = fetch_csv(
+            args.start, args.end, timeout=args.timeout, api_key=read_key_from_environment()
+        )
         origin = "Stooq CSV endpoint"
     frame = parse_csv(content, start=args.start, end=args.end)
-    print(f"WIG20 source={origin} rows={len(frame)} "
-          f"first={frame.iloc[0]['date']} last={frame.iloc[-1]['date']} write={args.write}")
+    print(
+        f"WIG20 source={origin} rows={len(frame)} "
+        f"first={frame.iloc[0]['date']} last={frame.iloc[-1]['date']} write={args.write}"
+    )
     print(frame.tail(5).to_string(index=False))
     if not args.write:
         print("DRY RUN: Snowflake unchanged. Add --write to insert missing dates.")
@@ -120,8 +135,7 @@ def main() -> None:
     if cfg.get("database", {}).get("driver", "").lower() != "snowflake":
         parser.error("Set Snowflake driver in config/database.yaml")
     with repository_from_config(cfg) as repo:
-        count, mismatches = check_overlaps(repo.connection, frame,
-                                           tolerance=args.overlap_tolerance)
+        count, mismatches = check_overlaps(repo.connection, frame, tolerance=args.overlap_tolerance)
         if mismatches:
             raise RuntimeError(
                 f"Existing WIG20 closes disagree with the incoming source on "
