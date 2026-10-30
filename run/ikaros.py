@@ -8,15 +8,15 @@ Existing ingestion modules remain the implementation layer.
 from __future__ import annotations
 
 import argparse
-import os
 import subprocess
 import sys
 import time
 from datetime import date
 from pathlib import Path
+from config.config import load_project_env
 
 ROOT = Path(__file__).resolve().parents[1]
-BROKER = "127.0.0.1:9092"
+# BROKER = "127.0.0.1:9092"
 
 
 class CommandFailure(RuntimeError):
@@ -39,9 +39,10 @@ def docker_compose(*args: str) -> list[str]:
 
 
 def runtime_environment() -> dict[str, str]:
-    env = os.environ.copy()
-    env.setdefault("IKAROS_KAFKA_BROKERS", BROKER)
-    return env
+    # env = os.environ.copy()
+    load_project_env()
+    # env.setdefault("IKAROS_KAFKA_BROKERS", BROKER)
+    # return env
 
 
 def bootstrap() -> None:

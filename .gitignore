@@ -6,6 +6,11 @@
 *.zip
 *.log
 
+# Local credentials and environment files
+.env
+.env.*
+!.env.example
+
 # Python package related
 __pycache__/
 *.py[cod]

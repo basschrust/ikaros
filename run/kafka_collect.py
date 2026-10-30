@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from datetime import date, timedelta
 import logging
+import math
 import os
 import time
 
@@ -39,21 +40,28 @@ def observations(*, dataset: str, symbol: str, days: int):
             return None if x is None or pd.isna(x) else float(x)
 
         day = pd.Timestamp(row["date"]).date()
-        if start <= day <= today:
-            results.append(
-                Observation(
-                    dataset=dataset,
-                    symbol=symbol,
-                    day=day,
-                    open=value("open"),
-                    high=value("high"),
-                    low=value("low"),
-                    close=value("close"),
-                    volume=value("volume"),
-                    dividend=value("dividend"),
-                    split_ratio=value("split_ratio"),
-                )
+        if not start <= day <= today:
+            continue
+
+        close = value("close")
+        if close is None or not math.isfinite(close) or close <= 0:
+            LOG.warning("SKIP INVALID CLOSE %s %s %s: %r", dataset, symbol, day, row.get("close"))
+            continue
+
+        results.append(
+            Observation(
+                dataset=dataset,
+                symbol=symbol,
+                day=day,
+                open=value("open"),
+                high=value("high"),
+                low=value("low"),
+                close=close,
+                volume=value("volume"),
+                dividend=value("dividend"),
+                split_ratio=value("split_ratio"),
             )
+        )
     return results
 
 
