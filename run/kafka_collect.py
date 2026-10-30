@@ -3,6 +3,7 @@
 Thin compatibility entry point; provider selection and normalization live in
 ikaros_app. The output event contract and Kafka topics are unchanged.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -32,7 +33,9 @@ def publish(producer, dataset: str, events: list[Observation]) -> int:
 
     for event in events:
         producer.produce(
-            TOPICS[dataset], key=event.key.encode("utf8"), value=event.serialize(),
+            TOPICS[dataset],
+            key=event.key.encode("utf8"),
+            value=event.serialize(),
             on_delivery=delivered,
         )
         producer.poll(0)
@@ -63,12 +66,14 @@ def main(argv: list[str] | None = None) -> None:
     if args.write:
         from confluent_kafka import Producer
 
-        producer = Producer({
-            "bootstrap.servers": os.getenv("IKAROS_KAFKA_BROKERS", "127.0.0.1:9092"),
-            "enable.idempotence": True,
-            "acks": "all",
-            "client.id": "ikaros-inbound-collector",
-        })
+        producer = Producer(
+            {
+                "bootstrap.servers": os.getenv("IKAROS_KAFKA_BROKERS", "127.0.0.1:9092"),
+                "enable.idempotence": True,
+                "acks": "all",
+                "client.id": "ikaros-inbound-collector",
+            }
+        )
     collector = DailyCollector()
     while True:
         failed = []
@@ -76,8 +81,14 @@ def main(argv: list[str] | None = None) -> None:
             try:
                 events = collector.collect(dataset=args.dataset, symbol=symbol, days=args.days)
                 count = publish(producer, args.dataset, events) if producer else len(events)
-                LOG.info("%s %s fetched=%d %s=%d", args.dataset, symbol,
-                         len(events), "published" if producer else "dry_run", count)
+                LOG.info(
+                    "%s %s fetched=%d %s=%d",
+                    args.dataset,
+                    symbol,
+                    len(events),
+                    "published" if producer else "dry_run",
+                    count,
+                )
             except Exception:
                 LOG.exception("COLLECT FAILED %s", symbol)
                 failed.append(symbol)

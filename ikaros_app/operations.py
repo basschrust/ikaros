@@ -1,4 +1,5 @@
 """Operator commands and process supervision, independent of argparse."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -86,8 +87,12 @@ class ProcessRunner:
                 print("Ikaros stopped. Kafka data volume is preserved.")
 
 
-def job_commands(*, fx_symbols: list[str], gpw_limit: int | None, days: int) -> dict[str, list[str]]:
-    scheduler = command("run.ikaros_scheduler", "--write", "--days", str(days), "--fx-symbols", *fx_symbols)
+def job_commands(
+    *, fx_symbols: list[str], gpw_limit: int | None, days: int
+) -> dict[str, list[str]]:
+    scheduler = command(
+        "run.ikaros_scheduler", "--write", "--days", str(days), "--fx-symbols", *fx_symbols
+    )
     if gpw_limit is not None:
         scheduler += ["--gpw-limit", str(gpw_limit)]
     return {
@@ -108,9 +113,14 @@ BACKFILL_MODULES = {
 
 
 def backfill_command(
-    dataset: str, *, start: str | None, end: str | None,
-    symbols: list[str] | None = None, limit: int | None = None,
-    csv: str | None = None, write: bool = False,
+    dataset: str,
+    *,
+    start: str | None,
+    end: str | None,
+    symbols: list[str] | None = None,
+    limit: int | None = None,
+    csv: str | None = None,
+    write: bool = False,
 ) -> list[str]:
     name = dataset.upper()
     if name not in BACKFILL_MODULES:

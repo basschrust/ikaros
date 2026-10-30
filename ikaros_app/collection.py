@@ -1,4 +1,5 @@
 """Convert provider dataframes to validated Kafka events, independently of Kafka."""
+
 from __future__ import annotations
 
 from datetime import date, timedelta

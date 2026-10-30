@@ -3,6 +3,7 @@
 Adapters contain no Kafka or database logic. Optional OpenBB imports are lazy,
 so offline tests and CLI help work without a network or Snowflake connection.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -54,8 +55,8 @@ class ProviderRegistry:
     """Small, explicit provider registry; no dynamic arbitrary module loading."""
 
     def __init__(self, providers: tuple[PriceHistoryProvider, ...] | None = None):
-        providers = providers if providers is not None else (
-            OpenBBFXProvider(), OpenBBEquityProvider()
+        providers = (
+            providers if providers is not None else (OpenBBFXProvider(), OpenBBEquityProvider())
         )
         self._providers: dict[str, PriceHistoryProvider] = {}
         for provider in providers:

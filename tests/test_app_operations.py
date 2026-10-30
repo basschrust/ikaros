@@ -8,10 +8,15 @@ def test_fx_backfill_requires_symbols():
 
 
 def test_fx_backfill_multiple_pairs():
-    command = backfill_command("FX", start="2010-01-01", end="2010-12-31", symbols=["EURPLN=X", "USDPLN=X"], write=True)
+    command = backfill_command(
+        "FX", start="2010-01-01", end="2010-12-31", symbols=["EURPLN=X", "USDPLN=X"], write=True
+    )
     assert command[1:3] == ["-m", "run.backfill_fx_snowflake"]
     assert command[-1] == "--continue-on-error"
-    assert command[command.index("--symbols") + 1:command.index("--write")] == ["EURPLN=X", "USDPLN=X"]
+    assert command[command.index("--symbols") + 1 : command.index("--write")] == [
+        "EURPLN=X",
+        "USDPLN=X",
+    ]
 
 
 def test_gpw_command_still_uses_existing_module():
