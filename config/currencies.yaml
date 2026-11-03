@@ -47,6 +47,11 @@ currencies:
 - code: SGD
   name: Singapore Dollar
   minor_unit: 2
+- code: HUF
+  name: Hungarian forint
+  minor_unit: 2
+####################################################  pairs  #####
+
 currency_pairs:
 - base: PLN
   quote: EUR
@@ -237,3 +242,6 @@ currency_pairs:
 - base: EUR
   quote: SGD
   symbol: EURSGD=X
+- base: HUF
+  quote: PLN
+  symbol: HUFPLN=X
