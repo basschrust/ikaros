@@ -12,11 +12,15 @@ TARGET = date(2026, 11, 2)
 def test_latest_date_per_symbol_and_source_selection():
     plan = build_plan(
         {
-            "GPW": [Instrument("PKO.WA", date(2026, 10, 30)),
-                    Instrument("KGH.WA", date(2026, 10, 29))],
-            "FX": [Instrument("EURPLN=X", date(2026, 10, 30)),
-                   Instrument("HUFPLN=X", date(2026, 10, 30)),
-                   Instrument("EURCZK=X", date(2026, 10, 30))],
+            "GPW": [
+                Instrument("PKO.WA", date(2026, 10, 30)),
+                Instrument("KGH.WA", date(2026, 10, 29)),
+            ],
+            "FX": [
+                Instrument("EURPLN=X", date(2026, 10, 30)),
+                Instrument("HUFPLN=X", date(2026, 10, 30)),
+                Instrument("EURCZK=X", date(2026, 10, 30)),
+            ],
             "WIG20": [Instrument("WIG20", date(2026, 10, 30))],
             "FW20": [Instrument("FW20Z2620", date(2026, 10, 30), date(2026, 12, 18))],
         },
@@ -31,17 +35,21 @@ def test_latest_date_per_symbol_and_source_selection():
 
 
 def test_skips_no_history_stale_and_expired():
-    plan = build_plan({
-        "GPW": [Instrument("NEW.WA", None), Instrument("OLD.WA", date(2020, 1, 1))],
-        "FW20": [Instrument("FW20U2620", date(2026, 8, 1), date(2026, 9, 18))],
-    }, target=TARGET)
+    plan = build_plan(
+        {
+            "GPW": [Instrument("NEW.WA", None), Instrument("OLD.WA", date(2020, 1, 1))],
+            "FW20": [Instrument("FW20U2620", date(2026, 8, 1), date(2026, 9, 18))],
+        },
+        target=TARGET,
+    )
     assert not plan.jobs
     assert len(plan.skipped) == 3
 
 
 def test_bootstrap_is_explicit_and_bounded():
-    plan = build_plan({"GPW": [Instrument("NEW.WA", None)]}, target=TARGET,
-                      bootstrap_start=date(2026, 10, 30))
+    plan = build_plan(
+        {"GPW": [Instrument("NEW.WA", None)]}, target=TARGET, bootstrap_start=date(2026, 10, 30)
+    )
     assert len(plan.jobs) == 1
     assert plan.jobs[0].start == date(2026, 10, 30)
 
@@ -52,7 +60,9 @@ def test_index_refresh_days():
 
 
 def test_futures_long_gap_needs_full_backfill():
-    plan = build_plan({"FW20": [Instrument("FW20Z2620", date(2026, 9, 1), date(2026, 12, 18))]}, target=TARGET)
+    plan = build_plan(
+        {"FW20": [Instrument("FW20Z2620", date(2026, 9, 1), date(2026, 12, 18))]}, target=TARGET
+    )
     assert not plan.jobs
     assert "full-page backfill" in plan.skipped[0]
 

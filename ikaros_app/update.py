@@ -79,8 +79,8 @@ def fetch_inventory(connection, dataset: str) -> list[Instrument]:
                  WHERE c."IS_ACTIVE" = TRUE
                  GROUP BY c."SYMBOL" ORDER BY c."SYMBOL"'''
     elif dataset == "WIG20":
-        sql = '''SELECT 'WIG20', MAX(TO_DATE("DATE")) FROM "INDEX_PRICES"
-                 WHERE "INDEX_SYMBOL" = 'WIG20' '''
+        sql = """SELECT 'WIG20', MAX(TO_DATE("DATE")) FROM "INDEX_PRICES"
+                 WHERE "INDEX_SYMBOL" = 'WIG20' """
     elif dataset == "FW20":
         sql = '''SELECT c."CONTRACT_ID", MAX(TO_DATE(p."DATE")), c."EXPIRY_DATE"
                  FROM "DERIVATIVE_CONTRACTS" c
@@ -96,12 +96,17 @@ def fetch_inventory(connection, dataset: str) -> list[Instrument]:
         result = cur.fetchall()
     return [
         Instrument(str(row[0]), as_date(row[1]), as_date(row[2]) if len(row) > 2 else None)
-        for row in result if row[0]
+        for row in result
+        if row[0]
     ]
 
 
 def latest_start(
-    latest: date | None, target: date, *, overlap: int, bootstrap: date | None,
+    latest: date | None,
+    target: date,
+    *,
+    overlap: int,
+    bootstrap: date | None,
 ) -> date | None:
     if latest is None:
         return bootstrap
@@ -163,7 +168,9 @@ def build_plan(
             if item.latest is not None and item.latest > target:
                 skipped.append(f"{dataset} {symbol}: latest {item.latest} is after target")
                 continue
-            start = latest_start(item.latest, target, overlap=overlap_days, bootstrap=bootstrap_start)
+            start = latest_start(
+                item.latest, target, overlap=overlap_days, bootstrap=bootstrap_start
+            )
             if start is None:
                 continue
             if source in {"GPW", "FX-YAHOO", "FX-NBP"}:
@@ -183,44 +190,89 @@ def build_plan(
                 if days > max_gap_days:
                     skipped.append("WIG20: too stale for short Yahoo refresh; use CSV backfill")
                     continue
-                jobs.append(Job(dataset, (symbol,), start, target,
-                                worker("run.refresh_index_prices", "--days", str(days))))
+                jobs.append(
+                    Job(
+                        dataset,
+                        (symbol,),
+                        start,
+                        target,
+                        worker("run.refresh_index_prices", "--days", str(days)),
+                    )
+                )
             elif source == "FW20":
                 # Recent endpoint only scrapes the newest BiznesRadar page.
                 # It must not claim it can repair a long historical gap.
                 days = max(2, (target - start).days + 1)
                 if days > 12:
-                    skipped.append(f"FW20 {symbol}: long gap {start}..{target}; use full-page backfill")
+                    skipped.append(
+                        f"FW20 {symbol}: long gap {start}..{target}; use full-page backfill"
+                    )
                     continue
                 groups[(source, start)].append(symbol)
 
     for (source, start), symbols in sorted(groups.items(), key=lambda x: (x[0][0], x[0][1])):
         for chunk in _chunks(sorted(set(symbols)), batch_size):
             if source == "GPW":
-                argv = worker("run.backfill_gpw_snowflake", "--symbols", *chunk,
-                              "--start", start.isoformat(), "--end", target.isoformat(),
-                              "--iic-force", "--continue-on-error")
+                argv = worker(
+                    "run.backfill_gpw_snowflake",
+                    "--symbols",
+                    *chunk,
+                    "--start",
+                    start.isoformat(),
+                    "--end",
+                    target.isoformat(),
+                    "--iic-force",
+                    "--continue-on-error",
+                )
                 label = "GPW"
             elif source == "FX-YAHOO":
                 # Provider end is commonly exclusive; ask for the next day but
                 # only last completed day is meaningful. Backfill normalizer
                 # bounds dates to --end, so this cannot invent today's candle.
-                argv = worker("run.backfill_fx_snowflake", "--symbols", *chunk,
-                              "--start", start.isoformat(), "--end", target.isoformat(),
-                              "--iic-force", "--continue-on-error")
+                argv = worker(
+                    "run.backfill_fx_snowflake",
+                    "--symbols",
+                    *chunk,
+                    "--start",
+                    start.isoformat(),
+                    "--end",
+                    target.isoformat(),
+                    "--iic-force",
+                    "--continue-on-error",
+                )
                 label = "FX-YAHOO"
             elif source == "FX-NBP":
-                argv = worker("run.backfill_fx_nbp", "--symbols", *chunk,
-                              "--start", start.isoformat(), "--end", target.isoformat(),
-                              "--continue-on-error")
+                argv = worker(
+                    "run.backfill_fx_nbp",
+                    "--symbols",
+                    *chunk,
+                    "--start",
+                    start.isoformat(),
+                    "--end",
+                    target.isoformat(),
+                    "--continue-on-error",
+                )
                 label = "FX-NBP"
             else:
                 days = max(2, (target - start).days + 1)
-                argv = worker("run.refresh_fw20_prices", "--symbols", *chunk,
-                              "--through", target.isoformat(), "--days", str(days))
+                argv = worker(
+                    "run.refresh_fw20_prices",
+                    "--symbols",
+                    *chunk,
+                    "--through",
+                    target.isoformat(),
+                    "--days",
+                    str(days),
+                )
                 label = "FW20"
             jobs.append(Job(label, chunk, start, target, argv))
     # Ordering: GPW and FX before index/futures is not required technically,
     # but makes operator logs easier to compare.
-    jobs.sort(key=lambda j: ({"GPW": 0, "FX-YAHOO": 1, "FX-NBP": 2, "WIG20": 3, "FW20": 4}[j.dataset], j.start, j.symbols))
+    jobs.sort(
+        key=lambda j: (
+            {"GPW": 0, "FX-YAHOO": 1, "FX-NBP": 2, "WIG20": 3, "FW20": 4}[j.dataset],
+            j.start,
+            j.symbols,
+        )
+    )
     return Plan(jobs, skipped, target)

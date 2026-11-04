@@ -162,7 +162,23 @@ def main() -> None:
                         if iic:
                             iic.finish(key, Status.NO_DATA)
                         continue
-                    clean = normalize_prices(fetched, symbol, begin, end)
+                    clean = normalize_prices(
+                        fetched,
+                        symbol,
+                        begin,
+                        end,
+                        skip_invalid=True,
+                    )
+                    if clean.empty:
+                        logger.warning(
+                            "NO_VALID_DATA %s %s..%s",
+                            symbol,
+                            begin,
+                            end,
+                        )
+                        if iic:
+                            iic.finish(key, Status.NO_DATA)
+                        continue
                     existing = existing_dates(repo.connection, symbol, begin, end)
                     missing = missing_observations(clean, existing)
                     attempted += len(clean)

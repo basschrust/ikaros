@@ -24,13 +24,26 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--datasets", choices=DATASETS, nargs="+", default=list(DATASETS))
     parser.add_argument("--write", action="store_true", help="Execute workers (default plan-only)")
-    parser.add_argument("--through", type=date.fromisoformat, help="Override Warsaw yesterday for a replay")
-    parser.add_argument("--overlap-days", type=int, default=2,
-                        help="Recheck this many days before latest; insert-only sources preserve rows")
-    parser.add_argument("--max-gap-days", type=int, default=90,
-                        help="Skip very stale symbols: use explicit historical backfill")
-    parser.add_argument("--bootstrap-start", type=date.fromisoformat,
-                        help="Opt in to loading instruments with no stored history")
+    parser.add_argument(
+        "--through", type=date.fromisoformat, help="Override Warsaw yesterday for a replay"
+    )
+    parser.add_argument(
+        "--overlap-days",
+        type=int,
+        default=2,
+        help="Recheck this many days before latest; insert-only sources preserve rows",
+    )
+    parser.add_argument(
+        "--max-gap-days",
+        type=int,
+        default=90,
+        help="Skip very stale symbols: use explicit historical backfill",
+    )
+    parser.add_argument(
+        "--bootstrap-start",
+        type=date.fromisoformat,
+        help="Opt in to loading instruments with no stored history",
+    )
     parser.add_argument("--batch-size", type=int, default=30)
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -46,8 +59,10 @@ def main(argv: list[str] | None = None) -> int:
     if config.get("database", {}).get("driver", "").lower() != "snowflake":
         parser.error("Select Snowflake in config/database.yaml")
     with repository_from_config(config) as repo:
-        inventories = {dataset: fetch_inventory(repo.connection, dataset)
-                       for dataset in dict.fromkeys(args.datasets)}
+        inventories = {
+            dataset: fetch_inventory(repo.connection, dataset)
+            for dataset in dict.fromkeys(args.datasets)
+        }
     plan = build_plan(
         inventories,
         datasets=tuple(dict.fromkeys(args.datasets)),
@@ -57,8 +72,13 @@ def main(argv: list[str] | None = None) -> int:
         bootstrap_start=args.bootstrap_start,
         batch_size=args.batch_size,
     )
-    LOG.info("Target completed-date=%s; jobs=%d; skipped=%d; write=%s",
-             plan.target, len(plan.jobs), len(plan.skipped), args.write)
+    LOG.info(
+        "Target completed-date=%s; jobs=%d; skipped=%d; write=%s",
+        plan.target,
+        len(plan.jobs),
+        len(plan.skipped),
+        args.write,
+    )
     for dataset, members in inventories.items():
         LOG.info("Inventory %s instruments=%d", dataset, len(members))
     for line in plan.skipped:
@@ -66,15 +86,28 @@ def main(argv: list[str] | None = None) -> int:
     failures = 0
     for number, job in enumerate(plan.jobs, 1):
         cmd = list(job.argv) + (["--write"] if args.write else [])
-        LOG.info("[%d/%d] %s symbols=%d %s..%s %s", number, len(plan.jobs),
-                 job.dataset, len(job.symbols), job.start, job.end, " ".join(cmd))
+        LOG.info(
+            "[%d/%d] %s symbols=%d %s..%s %s",
+            number,
+            len(plan.jobs),
+            job.dataset,
+            len(job.symbols),
+            job.start,
+            job.end,
+            " ".join(cmd),
+        )
         if args.write:
             code = subprocess.call(cmd)
             if code:
                 failures += 1
                 LOG.error("FAIL job %d returned %d", number, code)
-    LOG.info("Finished jobs=%d failed=%d skipped=%d dry_run=%s",
-             len(plan.jobs), failures, len(plan.skipped), not args.write)
+    LOG.info(
+        "Finished jobs=%d failed=%d skipped=%d dry_run=%s",
+        len(plan.jobs),
+        failures,
+        len(plan.skipped),
+        not args.write,
+    )
     return 1 if failures else 0
 
 
