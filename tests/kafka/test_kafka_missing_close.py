@@ -1,4 +1,3 @@
-
 """Regression tests: invalid provider closes must not discard valid sessions."""
 
 from datetime import date, timedelta
