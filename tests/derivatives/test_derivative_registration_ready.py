@@ -7,7 +7,7 @@ import pytest
 
 from ikaros_app.derivative_approval import parse_approved, promote
 
-CSV = Path(__file__).resolve().parents[1] / "output" / "derivative_approval_review.csv"
+CSV = Path(__file__).resolve().parents[2] / "output" / "derivative_approval_review.csv"
 
 
 def test_approved_inventory():

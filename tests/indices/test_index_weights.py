@@ -7,7 +7,7 @@ import pytest
 
 from run.ingest_index_weights import load_snapshot, persist, source_label
 
-FIXTURE = Path(__file__).resolve().parents[1] / "data" / "wig20_weights_2026-10-22.csv"
+FIXTURE = Path(__file__).resolve().parents[2] / "data" / "wig20_weights_2026-10-22.csv"
 
 
 def test_snapshot():
