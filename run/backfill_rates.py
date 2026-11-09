@@ -1,4 +1,4 @@
-"""Load official US Treasury par and ECB AAA spot yields into the Ikaros schema.
+"""Load US Treasury par, ECB AAA spot and NY Fed overnight reference rates into the Ikaros schema.
 
 No new repository or external dependencies. Dry-run by default; --write merges
 by (series_id, observation date). Source values are normalized percent->decimal.
@@ -16,7 +16,7 @@ from config.config import load_config
 from database.repositories.factory import repository_from_config
 from ikaros_app.operations import load_environment
 from ikaros_app.rates import (
-    ECBSpotYieldProvider, TreasuryYieldProvider, selected_sources,
+    ECBSpotYieldProvider, TreasuryYieldProvider, NYFedOvernightProvider, selected_sources,
 )
 
 LOG = logging.getLogger(__name__)
@@ -101,7 +101,7 @@ def main() -> None:
     all_observations = []
     with requests.Session() as session:
         session.headers.update({'User-Agent': 'IkarosMarketData/1.0'})
-        for provider in (TreasuryYieldProvider(), ECBSpotYieldProvider()):
+        for provider in (TreasuryYieldProvider(), ECBSpotYieldProvider(), NYFedOvernightProvider()):
             if provider.source not in sources:
                 continue
             values = provider.history(session, args.start, args.end)

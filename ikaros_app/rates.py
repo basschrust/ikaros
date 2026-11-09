@@ -24,7 +24,11 @@ UST_TENORS = {
     "20 Yr": "20Y", "30 Yr": "30Y",
 }
 ECB_TENORS = ("3M", "6M", "1Y", "2Y", "3Y", "5Y", "7Y", "10Y", "15Y", "20Y", "30Y")
-RATE_SOURCES = ("UST", "ECB")
+RATE_SOURCES = ("UST", "ECB", "NYFED")
+NYFED_ENDPOINTS = {
+    "SOFR": "https://markets.newyorkfed.org/api/rates/secured/sofr/search.json",
+    "EFFR": "https://markets.newyorkfed.org/api/rates/unsecured/effr/search.json",
+}
 
 
 @dataclass(frozen=True)
@@ -57,6 +61,12 @@ def configured_series() -> dict[str, RateSeries]:
         key = f"B.U2.EUR.4F.G_N_A.SV_C_YM.SR_{tenor}"
         series[sid] = RateSeries(sid, "ECB", "EUR", "GOV_AAA_SPOT", tenor,
                                  key, "CONTINUOUS", None)
+    for rate_name in NYFED_ENDPOINTS:
+        sid = f"NYFED_{rate_name}_USD_ON"
+        series[sid] = RateSeries(
+            sid, "NYFED", "USD", "OVERNIGHT_REFERENCE", "ON",
+            rate_name, "PUBLISHED_OVERNIGHT", None,
+        )
     return series
 
 
@@ -162,6 +172,53 @@ class ECBSpotYieldProvider:
         )
         r.raise_for_status()
         return parse_ecb_csv(r.text, start, end)
+
+
+def parse_nyfed_json(
+    payload: dict, rate_name: str, start: date, end: date
+) -> list[RateObservation]:
+    """Read official NY Fed reference-rate records, never infer missing days."""
+    if rate_name not in NYFED_ENDPOINTS:
+        raise ValueError(f"Unsupported NY Fed reference rate: {rate_name}")
+    if not isinstance(payload, dict) or not isinstance(payload.get("refRates"), list):
+        raise ValueError("NY Fed response missing refRates list")
+    records = []
+    for item in payload["refRates"]:
+        if not isinstance(item, dict) or item.get("type") != rate_name:
+            raise ValueError(f"Unexpected NY Fed rate type in {rate_name} response")
+        day = date.fromisoformat(item["effectiveDate"])
+        if start <= day <= end:
+            value = item.get("percentRate")
+            if value is None:
+                raise ValueError(f"Missing {rate_name} rate for {day}")
+            records.append(RateObservation(
+                f"NYFED_{rate_name}_USD_ON", day,
+                percent_to_decimal(str(value), rate_name),
+            ))
+    return _unique(records)
+
+
+class NYFedOvernightProvider:
+    """Official SOFR and EFFR reference rates; effective dates, not publication dates."""
+
+    source = "NYFED"
+
+    def history(self, session: requests.Session, start: date, end: date) -> list[RateObservation]:
+        records = []
+        for rate_name, url in NYFED_ENDPOINTS.items():
+            response = session.get(
+                url,
+                params={
+                    "startDate": start.isoformat(),
+                    "endDate": end.isoformat(),
+                    "type": "rate",
+                },
+                timeout=45,
+                headers={"Accept": "application/json"},
+            )
+            response.raise_for_status()
+            records.extend(parse_nyfed_json(response.json(), rate_name, start, end))
+        return _unique(records)
 
 
 def selected_sources(series_ids: list[str] | None) -> tuple[dict[str, RateSeries], set[str]]:

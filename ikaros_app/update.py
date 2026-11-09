@@ -82,8 +82,8 @@ def fetch_inventory(connection, dataset: str) -> list[Instrument]:
                  WHERE c."IS_ACTIVE" = TRUE
                  GROUP BY c."SYMBOL" ORDER BY c."SYMBOL"'''
     elif dataset == "WIG20":
-        sql = '''SELECT 'WIG20', MAX(TO_DATE("DATE")) FROM "INDEX_PRICES"
-                 WHERE "INDEX_SYMBOL" = 'WIG20' '''
+        sql = """SELECT 'WIG20', MAX(TO_DATE("DATE")) FROM "INDEX_PRICES"
+                 WHERE "INDEX_SYMBOL" = 'WIG20' """
     elif dataset == "RATES":
         sql = '''SELECT s."SERIES_ID", MAX(o."DATE")
                  FROM "RATE_SERIES" s LEFT JOIN "RATE_OBSERVATIONS" o
@@ -92,17 +92,18 @@ def fetch_inventory(connection, dataset: str) -> list[Instrument]:
                  GROUP BY s."SERIES_ID" ORDER BY s."SERIES_ID"'''
     elif dataset in {"FW20", "DERIVATIVES"}:
         predicate = (
-            '''c."INSTRUMENT_TYPE" = 'FUTURE' AND c."UNDERLYING_SYMBOL" = 'WIG20' '''
+            """c."INSTRUMENT_TYPE" = 'FUTURE' AND c."UNDERLYING_SYMBOL" = 'WIG20' """
             if dataset == "FW20"
-            else '''c."INSTRUMENT_TYPE" IN ('FUTURE', 'OPTION') '''
+            else """c."INSTRUMENT_TYPE" IN ('FUTURE', 'OPTION') """
         )
         sql = (
-            '''SELECT c."CONTRACT_ID", MAX(TO_DATE(p."DATE")), c."EXPIRY_DATE"
+            """SELECT c."CONTRACT_ID", MAX(TO_DATE(p."DATE")), c."EXPIRY_DATE"
                FROM "DERIVATIVE_CONTRACTS" c
                LEFT JOIN "DERIVATIVE_PRICES" p
                  ON p."CONTRACT_ID" = c."CONTRACT_ID"
-               WHERE ''' + predicate +
-            '''GROUP BY c."CONTRACT_ID", c."EXPIRY_DATE"
+               WHERE """
+            + predicate
+            + '''GROUP BY c."CONTRACT_ID", c."EXPIRY_DATE"
                ORDER BY c."CONTRACT_ID"'''
         )
     else:
@@ -246,8 +247,13 @@ def build_plan(
                     skipped.append("WIG20: too stale for short Yahoo refresh; use CSV backfill")
                     continue
                 jobs.append(
-                    Job(dataset, (symbol,), start, target,
-                        worker("run.refresh_index_prices", "--days", str(days)))
+                    Job(
+                        dataset,
+                        (symbol,),
+                        start,
+                        target,
+                        worker("run.refresh_index_prices", "--days", str(days)),
+                    )
                 )
             elif source == "FW20":
                 days = max(2, (target - start).days + 1)
@@ -262,29 +268,52 @@ def build_plan(
         for chunk in _chunks(sorted(set(symbols)), batch_size):
             if source == "GPW":
                 argv = worker(
-                    "run.backfill_gpw_snowflake", "--symbols", *chunk, "--start",
-                    start.isoformat(), "--end", target.isoformat(),
-                    "--iic-force", "--continue-on-error",
+                    "run.backfill_gpw_snowflake",
+                    "--symbols",
+                    *chunk,
+                    "--start",
+                    start.isoformat(),
+                    "--end",
+                    target.isoformat(),
+                    "--iic-force",
+                    "--continue-on-error",
                 )
                 label = "GPW"
             elif source == "FX-YAHOO":
                 argv = worker(
-                    "run.backfill_fx_snowflake", "--symbols", *chunk, "--start",
-                    start.isoformat(), "--end", target.isoformat(),
-                    "--iic-force", "--continue-on-error",
+                    "run.backfill_fx_snowflake",
+                    "--symbols",
+                    *chunk,
+                    "--start",
+                    start.isoformat(),
+                    "--end",
+                    target.isoformat(),
+                    "--iic-force",
+                    "--continue-on-error",
                 )
                 label = "FX-YAHOO"
             elif source == "FX-NBP":
                 argv = worker(
-                    "run.backfill_fx_nbp", "--symbols", *chunk, "--start",
-                    start.isoformat(), "--end", target.isoformat(), "--continue-on-error",
+                    "run.backfill_fx_nbp",
+                    "--symbols",
+                    *chunk,
+                    "--start",
+                    start.isoformat(),
+                    "--end",
+                    target.isoformat(),
+                    "--continue-on-error",
                 )
                 label = "FX-NBP"
             else:
                 days = max(2, (target - start).days + 1)
                 argv = worker(
-                    "run.refresh_fw20_prices", "--symbols", *chunk,
-                    "--through", target.isoformat(), "--days", str(days),
+                    "run.refresh_fw20_prices",
+                    "--symbols",
+                    *chunk,
+                    "--through",
+                    target.isoformat(),
+                    "--days",
+                    str(days),
                 )
                 label = "FW20"
             jobs.append(Job(label, chunk, start, target, argv))
@@ -294,13 +323,18 @@ def build_plan(
             # Every backfill subprocess normally writes to the same CSV path;
             # give each group its own report to preserve failures and NO_DATA.
             report = (
-                f"output/derivative_update_{start:%Y%m%d}_{end:%Y%m%d}"
-                f"_{batch_no}_{chunk[0]}.csv"
+                f"output/derivative_update_{start:%Y%m%d}_{end:%Y%m%d}_{batch_no}_{chunk[0]}.csv"
             )
             argv = worker(
-                "run.backfill_derivative_prices", "--start", start.isoformat(),
-                "--end", end.isoformat(), "--symbols", *chunk,
-                "--report", report,
+                "run.backfill_derivative_prices",
+                "--start",
+                start.isoformat(),
+                "--end",
+                end.isoformat(),
+                "--symbols",
+                *chunk,
+                "--report",
+                report,
             )
             jobs.append(Job("DERIVATIVES", chunk, start, end, argv))
 
@@ -313,17 +347,30 @@ def build_plan(
                     start,
                     target,
                     worker(
-                        "run.backfill_rates", "--start", start.isoformat(),
-                        "--end", target.isoformat(), "--series", *chunk,
+                        "run.backfill_rates",
+                        "--start",
+                        start.isoformat(),
+                        "--end",
+                        target.isoformat(),
+                        "--series",
+                        *chunk,
                     ),
                 )
             )
 
     jobs.sort(
         key=lambda j: (
-            {"GPW": 0, "FX-YAHOO": 1, "FX-NBP": 2, "WIG20": 3,
-             "FW20": 4, "DERIVATIVES": 4, "RATES": 5}[j.dataset],
-            j.start, j.symbols,
+            {
+                "GPW": 0,
+                "FX-YAHOO": 1,
+                "FX-NBP": 2,
+                "WIG20": 3,
+                "FW20": 4,
+                "DERIVATIVES": 4,
+                "RATES": 5,
+            }[j.dataset],
+            j.start,
+            j.symbols,
         )
     )
     return Plan(jobs, skipped, target)
