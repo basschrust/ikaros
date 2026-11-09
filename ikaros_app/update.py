@@ -1,7 +1,7 @@
 """Plan incremental Snowflake market-data refreshes without rewriting existing data.
 
 One database read per dataset, grouped worker commands, no Kafka dependency.
-This is a *latest-date catch-up*, not a scanner for interior historical gaps.
+This is a latest-date catch-up, not a scanner for interior historical gaps.
 """
 
 from __future__ import annotations
@@ -16,15 +16,18 @@ from zoneinfo import ZoneInfo
 
 LOG = logging.getLogger(__name__)
 
-# Source-backed yfinance daily FX pairs that have been tested in Ikaros.
-# Deliberately exclude synthetically derived currency crosses.
 YAHOO_FX = frozenset(
     "AUDPLN=X AUDUSD=X CHFPLN=X DKKPLN=X EURAUD=X EURCAD=X EURCHF=X "
     "EURCNY=X EURDKK=X EURGBP=X EURJPY=X EURNOK=X EURPLN=X EURSEK=X "
     "EURSGD=X EURUSD=X GBPPLN=X GBPUSD=X NZDUSD=X USDCAD=X USDCHF=X "
     "USDCNY=X USDDKK=X USDJPY=X USDNOK=X USDPLN=X USDSEK=X USDSGD=X".split()
 )
-DATASETS = ("GPW", "FX", "WIG20", "FW20")
+
+# FW20 remains a supported explicit dataset, but the default run uses
+# DERIVATIVES instead: this includes FW20 and every other future and option.
+DATASETS = ("GPW", "FX", "WIG20", "FW20", "DERIVATIVES", "RATES")
+DEFAULT_DATASETS = ("GPW", "FX", "WIG20", "DERIVATIVES", "RATES")
+DERIVATIVE_EMPTY_LOOKBACK_DAYS = 7
 
 
 @dataclass(frozen=True)
@@ -65,7 +68,7 @@ def as_date(value) -> date | None:
 
 
 def fetch_inventory(connection, dataset: str) -> list[Instrument]:
-    """Query registered instruments, retaining those without any price records."""
+    """Query registered instruments, retaining those without price records."""
     if dataset == "GPW":
         sql = '''SELECT s."SYMBOL", MAX(TO_DATE(p."DATE"))
                  FROM "SECURITIES" s LEFT JOIN "PRICES" p
@@ -79,16 +82,29 @@ def fetch_inventory(connection, dataset: str) -> list[Instrument]:
                  WHERE c."IS_ACTIVE" = TRUE
                  GROUP BY c."SYMBOL" ORDER BY c."SYMBOL"'''
     elif dataset == "WIG20":
-        sql = """SELECT 'WIG20', MAX(TO_DATE("DATE")) FROM "INDEX_PRICES"
-                 WHERE "INDEX_SYMBOL" = 'WIG20' """
-    elif dataset == "FW20":
-        sql = '''SELECT c."CONTRACT_ID", MAX(TO_DATE(p."DATE")), c."EXPIRY_DATE"
-                 FROM "DERIVATIVE_CONTRACTS" c
-                 LEFT JOIN "DERIVATIVE_PRICES" p ON p."CONTRACT_ID" = c."CONTRACT_ID"
-                 WHERE c."INSTRUMENT_TYPE" = 'FUTURE'
-                   AND c."UNDERLYING_SYMBOL" = 'WIG20'
-                 GROUP BY c."CONTRACT_ID", c."EXPIRY_DATE"
-                 ORDER BY c."CONTRACT_ID"'''
+        sql = '''SELECT 'WIG20', MAX(TO_DATE("DATE")) FROM "INDEX_PRICES"
+                 WHERE "INDEX_SYMBOL" = 'WIG20' '''
+    elif dataset == "RATES":
+        sql = '''SELECT s."SERIES_ID", MAX(o."DATE")
+                 FROM "RATE_SERIES" s LEFT JOIN "RATE_OBSERVATIONS" o
+                 ON s."SERIES_ID" = o."SERIES_ID"
+                 WHERE s."IS_ACTIVE" = TRUE
+                 GROUP BY s."SERIES_ID" ORDER BY s."SERIES_ID"'''
+    elif dataset in {"FW20", "DERIVATIVES"}:
+        predicate = (
+            '''c."INSTRUMENT_TYPE" = 'FUTURE' AND c."UNDERLYING_SYMBOL" = 'WIG20' '''
+            if dataset == "FW20"
+            else '''c."INSTRUMENT_TYPE" IN ('FUTURE', 'OPTION') '''
+        )
+        sql = (
+            '''SELECT c."CONTRACT_ID", MAX(TO_DATE(p."DATE")), c."EXPIRY_DATE"
+               FROM "DERIVATIVE_CONTRACTS" c
+               LEFT JOIN "DERIVATIVE_PRICES" p
+                 ON p."CONTRACT_ID" = c."CONTRACT_ID"
+               WHERE ''' + predicate +
+            '''GROUP BY c."CONTRACT_ID", c."EXPIRY_DATE"
+               ORDER BY c."CONTRACT_ID"'''
+        )
     else:
         raise ValueError(f"Unsupported dataset: {dataset}")
     with closing(connection.cursor()) as cur:
@@ -112,8 +128,6 @@ def latest_start(
         return bootstrap
     if latest > target:
         return None
-    # Include a short overlap to recheck missed tail sessions. Existing quotes
-    # are not replaced by insert-only backfill workers.
     return latest + timedelta(days=1 - overlap)
 
 
@@ -140,15 +154,27 @@ def build_plan(
         raise ValueError("Invalid overlap, max gap, or batch size")
     if bootstrap_start is not None and bootstrap_start > target:
         raise ValueError("Bootstrap start must not be after target")
+    # update_all.py defaults to every choice in DATASETS. When both are
+    # present, DERIVATIVES supersedes its FW20 subset. Keep FW20 available
+    # for explicit legacy runs and old callers.
+    supersede_fw20 = "DERIVATIVES" in datasets and "DERIVATIVES" in inventories
     jobs: list[Job] = []
     skipped: list[str] = []
     groups: dict[tuple[str, date], list[str]] = defaultdict(list)
+    derivative_groups: dict[tuple[date, date], list[str]] = defaultdict(list)
+    rate_groups: dict[date, list[str]] = defaultdict(list)
+
     for dataset in datasets:
+        if dataset == "FW20" and supersede_fw20:
+            continue
         if dataset not in DATASETS:
             raise ValueError(f"Unsupported dataset: {dataset}")
         for item in inventories.get(dataset, []):
             symbol = item.symbol
-            if dataset == "FW20" and item.expiry is not None and item.expiry < target:
+            if dataset in {"FW20", "DERIVATIVES"} and item.expiry is None:
+                skipped.append(f"{dataset} {symbol}: missing verified expiry date")
+                continue
+            if dataset in {"FW20", "DERIVATIVES"} and item.expiry < target:
                 skipped.append(f"{dataset} {symbol}: expired {item.expiry}")
                 continue
             if dataset == "FX":
@@ -157,25 +183,56 @@ def build_plan(
                 elif symbol.endswith("PLN=X") and symbol[:3].isalpha() and len(symbol) == 8:
                     source = "FX-NBP"
                 else:
-                    # No triangulation, and do not assume a supported market feed.
                     skipped.append(f"FX {symbol}: no configured direct feed")
                     continue
             else:
                 source = dataset
-            if item.latest is None and bootstrap_start is None:
-                skipped.append(f"{dataset} {symbol}: no stored history; use --bootstrap-start")
-                continue
-            if item.latest is not None and item.latest > target:
-                skipped.append(f"{dataset} {symbol}: latest {item.latest} is after target")
-                continue
-            start = latest_start(
-                item.latest, target, overlap=overlap_days, bootstrap=bootstrap_start
-            )
+
+            if item.latest is None:
+                if dataset == "RATES":
+                    start = bootstrap_start or target - timedelta(days=30)
+                elif dataset == "DERIVATIVES":
+                    # Include newly registered derivatives without triggering a
+                    # multi-year backfill on an everyday refresh.
+                    start = bootstrap_start or target - timedelta(
+                        days=DERIVATIVE_EMPTY_LOOKBACK_DAYS - 1
+                    )
+                else:
+                    start = bootstrap_start
+                if start is None:
+                    skipped.append(f"{dataset} {symbol}: no stored history; use --bootstrap-start")
+                    continue
+            else:
+                if item.latest > target:
+                    skipped.append(f"{dataset} {symbol}: latest {item.latest} is after target")
+                    continue
+                start = latest_start(
+                    item.latest, target, overlap=overlap_days, bootstrap=bootstrap_start
+                )
             if start is None:
                 continue
-            if source in {"GPW", "FX-YAHOO", "FX-NBP"}:
-                # Prevent a stale/delisted series from causing an unexpected
-                # multi-year update in a routine daily refresh.
+            if start > target:
+                continue
+            if source == "RATES":
+                # A 30-day bootstrap is safe; historical backfills remain explicit.
+                if (target - start).days + 1 > max_gap_days:
+                    skipped.append(
+                        f"RATES {symbol}: {start}..{target} exceeds "
+                        f"--max-gap-days={max_gap_days}; use explicit backfill"
+                    )
+                    continue
+                rate_groups[start].append(symbol)
+            elif source == "DERIVATIVES":
+                # Historical series can be sparse. Their latest stored trade can
+                # be months old even when the feed is healthy: cap daily scan.
+                if (target - start).days + 1 > max_gap_days:
+                    skipped.append(
+                        f"DERIVATIVES {symbol}: {start}..{target} exceeds "
+                        f"--max-gap-days={max_gap_days}; use explicit backfill"
+                    )
+                    continue
+                derivative_groups[(start, target)].append(symbol)
+            elif source in {"GPW", "FX-YAHOO", "FX-NBP"}:
                 if (target - start).days + 1 > max_gap_days:
                     skipped.append(
                         f"{dataset} {symbol}: {start}..{target} exceeds "
@@ -184,24 +241,15 @@ def build_plan(
                     continue
                 groups[(source, start)].append(symbol)
             elif source == "WIG20":
-                # Yahoo hourly API is a recent-history source; a full historical
-                # WIG20 repair belongs to the CSV backfill provider.
                 days = max(2, (target - start).days + 1)
                 if days > max_gap_days:
                     skipped.append("WIG20: too stale for short Yahoo refresh; use CSV backfill")
                     continue
                 jobs.append(
-                    Job(
-                        dataset,
-                        (symbol,),
-                        start,
-                        target,
-                        worker("run.refresh_index_prices", "--days", str(days)),
-                    )
+                    Job(dataset, (symbol,), start, target,
+                        worker("run.refresh_index_prices", "--days", str(days)))
                 )
             elif source == "FW20":
-                # Recent endpoint only scrapes the newest BiznesRadar page.
-                # It must not claim it can repair a long historical gap.
                 days = max(2, (target - start).days + 1)
                 if days > 12:
                     skipped.append(
@@ -214,65 +262,68 @@ def build_plan(
         for chunk in _chunks(sorted(set(symbols)), batch_size):
             if source == "GPW":
                 argv = worker(
-                    "run.backfill_gpw_snowflake",
-                    "--symbols",
-                    *chunk,
-                    "--start",
-                    start.isoformat(),
-                    "--end",
-                    target.isoformat(),
-                    "--iic-force",
-                    "--continue-on-error",
+                    "run.backfill_gpw_snowflake", "--symbols", *chunk, "--start",
+                    start.isoformat(), "--end", target.isoformat(),
+                    "--iic-force", "--continue-on-error",
                 )
                 label = "GPW"
             elif source == "FX-YAHOO":
-                # Provider end is commonly exclusive; ask for the next day but
-                # only last completed day is meaningful. Backfill normalizer
-                # bounds dates to --end, so this cannot invent today's candle.
                 argv = worker(
-                    "run.backfill_fx_snowflake",
-                    "--symbols",
-                    *chunk,
-                    "--start",
-                    start.isoformat(),
-                    "--end",
-                    target.isoformat(),
-                    "--iic-force",
-                    "--continue-on-error",
+                    "run.backfill_fx_snowflake", "--symbols", *chunk, "--start",
+                    start.isoformat(), "--end", target.isoformat(),
+                    "--iic-force", "--continue-on-error",
                 )
                 label = "FX-YAHOO"
             elif source == "FX-NBP":
                 argv = worker(
-                    "run.backfill_fx_nbp",
-                    "--symbols",
-                    *chunk,
-                    "--start",
-                    start.isoformat(),
-                    "--end",
-                    target.isoformat(),
-                    "--continue-on-error",
+                    "run.backfill_fx_nbp", "--symbols", *chunk, "--start",
+                    start.isoformat(), "--end", target.isoformat(), "--continue-on-error",
                 )
                 label = "FX-NBP"
             else:
                 days = max(2, (target - start).days + 1)
                 argv = worker(
-                    "run.refresh_fw20_prices",
-                    "--symbols",
-                    *chunk,
-                    "--through",
-                    target.isoformat(),
-                    "--days",
-                    str(days),
+                    "run.refresh_fw20_prices", "--symbols", *chunk,
+                    "--through", target.isoformat(), "--days", str(days),
                 )
                 label = "FW20"
             jobs.append(Job(label, chunk, start, target, argv))
-    # Ordering: GPW and FX before index/futures is not required technically,
-    # but makes operator logs easier to compare.
+
+    for (start, end), symbols in sorted(derivative_groups.items()):
+        for batch_no, chunk in enumerate(_chunks(sorted(set(symbols)), batch_size), 1):
+            # Every backfill subprocess normally writes to the same CSV path;
+            # give each group its own report to preserve failures and NO_DATA.
+            report = (
+                f"output/derivative_update_{start:%Y%m%d}_{end:%Y%m%d}"
+                f"_{batch_no}_{chunk[0]}.csv"
+            )
+            argv = worker(
+                "run.backfill_derivative_prices", "--start", start.isoformat(),
+                "--end", end.isoformat(), "--symbols", *chunk,
+                "--report", report,
+            )
+            jobs.append(Job("DERIVATIVES", chunk, start, end, argv))
+
+    for start, symbols in sorted(rate_groups.items()):
+        for chunk in _chunks(sorted(set(symbols)), batch_size):
+            jobs.append(
+                Job(
+                    "RATES",
+                    chunk,
+                    start,
+                    target,
+                    worker(
+                        "run.backfill_rates", "--start", start.isoformat(),
+                        "--end", target.isoformat(), "--series", *chunk,
+                    ),
+                )
+            )
+
     jobs.sort(
         key=lambda j: (
-            {"GPW": 0, "FX-YAHOO": 1, "FX-NBP": 2, "WIG20": 3, "FW20": 4}[j.dataset],
-            j.start,
-            j.symbols,
+            {"GPW": 0, "FX-YAHOO": 1, "FX-NBP": 2, "WIG20": 3,
+             "FW20": 4, "DERIVATIVES": 4, "RATES": 5}[j.dataset],
+            j.start, j.symbols,
         )
     )
     return Plan(jobs, skipped, target)
