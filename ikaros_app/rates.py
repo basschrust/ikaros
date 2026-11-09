@@ -18,10 +18,20 @@ import requests
 UST_URL = "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/{year}/all"
 ECB_URL = "https://data-api.ecb.europa.eu/service/data/YC/{key}"
 UST_TENORS = {
-    "1 Mo": "1M", "1.5 Mo": "1_5M", "2 Mo": "2M", "3 Mo": "3M",
-    "4 Mo": "4M", "6 Mo": "6M", "1 Yr": "1Y", "2 Yr": "2Y",
-    "3 Yr": "3Y", "5 Yr": "5Y", "7 Yr": "7Y", "10 Yr": "10Y",
-    "20 Yr": "20Y", "30 Yr": "30Y",
+    "1 Mo": "1M",
+    "1.5 Mo": "1_5M",
+    "2 Mo": "2M",
+    "3 Mo": "3M",
+    "4 Mo": "4M",
+    "6 Mo": "6M",
+    "1 Yr": "1Y",
+    "2 Yr": "2Y",
+    "3 Yr": "3Y",
+    "5 Yr": "5Y",
+    "7 Yr": "7Y",
+    "10 Yr": "10Y",
+    "20 Yr": "20Y",
+    "30 Yr": "30Y",
 }
 ECB_TENORS = ("3M", "6M", "1Y", "2Y", "3Y", "5Y", "7Y", "10Y", "15Y", "20Y", "30Y")
 RATE_SOURCES = ("UST", "ECB", "NYFED")
@@ -54,18 +64,31 @@ def configured_series() -> dict[str, RateSeries]:
     series = {}
     for tenor in UST_TENORS.values():
         sid = f"UST_PAR_USD_{tenor}"
-        series[sid] = RateSeries(sid, "UST", "USD", "GOV_PAR", tenor,
-                                 "daily_treasury_yield_curve", "PUBLISHED_PAR_YIELD", None)
+        series[sid] = RateSeries(
+            sid,
+            "UST",
+            "USD",
+            "GOV_PAR",
+            tenor,
+            "daily_treasury_yield_curve",
+            "PUBLISHED_PAR_YIELD",
+            None,
+        )
     for tenor in ECB_TENORS:
         sid = f"ECB_AAA_SPOT_EUR_{tenor}"
         key = f"B.U2.EUR.4F.G_N_A.SV_C_YM.SR_{tenor}"
-        series[sid] = RateSeries(sid, "ECB", "EUR", "GOV_AAA_SPOT", tenor,
-                                 key, "CONTINUOUS", None)
+        series[sid] = RateSeries(sid, "ECB", "EUR", "GOV_AAA_SPOT", tenor, key, "CONTINUOUS", None)
     for rate_name in NYFED_ENDPOINTS:
         sid = f"NYFED_{rate_name}_USD_ON"
         series[sid] = RateSeries(
-            sid, "NYFED", "USD", "OVERNIGHT_REFERENCE", "ON",
-            rate_name, "PUBLISHED_OVERNIGHT", None,
+            sid,
+            "NYFED",
+            "USD",
+            "OVERNIGHT_REFERENCE",
+            "ON",
+            rate_name,
+            "PUBLISHED_OVERNIGHT",
+            None,
         )
     return series
 
@@ -91,8 +114,9 @@ def parse_treasury_csv(content: str, start: date, end: date) -> list[RateObserva
     rows = csv.DictReader(StringIO(content.lstrip("\ufeff")))
     if not rows.fieldnames or "Date" not in rows.fieldnames:
         raise ValueError("Treasury response missing Date column")
-    recognized = {column: tenor for column, tenor in UST_TENORS.items()
-                  if column in rows.fieldnames}
+    recognized = {
+        column: tenor for column, tenor in UST_TENORS.items() if column in rows.fieldnames
+    }
     if not recognized:
         raise ValueError("Treasury response has no recognized maturity columns")
     result = []
@@ -100,14 +124,20 @@ def parse_treasury_csv(content: str, start: date, end: date) -> list[RateObserva
         if not row.get("Date"):
             continue
         stamp = row["Date"].strip()
-        day = (date.fromisoformat(stamp) if re.fullmatch(r"\d{4}-\d{2}-\d{2}", stamp)
-               else datetime.strptime(stamp, "%m/%d/%Y").date())
+        day = (
+            date.fromisoformat(stamp)
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", stamp)
+            else datetime.strptime(stamp, "%m/%d/%Y").date()
+        )
         if start <= day <= end:
             for column, tenor in recognized.items():
                 raw = (row.get(column) or "").strip()
                 if raw and raw.upper() not in {"N/A", "ND"}:
-                    result.append(RateObservation(f"UST_PAR_USD_{tenor}", day,
-                                                  percent_to_decimal(raw, column)))
+                    result.append(
+                        RateObservation(
+                            f"UST_PAR_USD_{tenor}", day, percent_to_decimal(raw, column)
+                        )
+                    )
     return _unique(result)
 
 
@@ -134,8 +164,9 @@ def parse_ecb_csv(content: str, start: date, end: date) -> list[RateObservation]
         tenor = match.group(1)
         if tenor not in ECB_TENORS:
             raise ValueError(f"Unexpected ECB tenor {tenor}")
-        result.append(RateObservation(f"ECB_AAA_SPOT_EUR_{tenor}", day,
-                                      percent_to_decimal(raw, kind)))
+        result.append(
+            RateObservation(f"ECB_AAA_SPOT_EUR_{tenor}", day, percent_to_decimal(raw, kind))
+        )
     return _unique(result)
 
 
@@ -149,8 +180,12 @@ class TreasuryYieldProvider:
         for year in range(start.year, end.year + 1):
             r = session.get(
                 UST_URL.format(year=year),
-                params={"type": "daily_treasury_yield_curve", "field_tdr_date_value": str(year),
-                        "_format": "csv"}, timeout=45,
+                params={
+                    "type": "daily_treasury_yield_curve",
+                    "field_tdr_date_value": str(year),
+                    "_format": "csv",
+                },
+                timeout=45,
             )
             r.raise_for_status()
             records.extend(parse_treasury_csv(r.text, start, end))
@@ -166,8 +201,12 @@ class ECBSpotYieldProvider:
         key = "B.U2.EUR.4F.G_N_A.SV_C_YM." + "+".join(f"SR_{t}" for t in ECB_TENORS)
         r = session.get(
             ECB_URL.format(key=key),
-            params={"format": "csvdata", "startPeriod": start.isoformat(),
-                    "endPeriod": end.isoformat()}, timeout=60,
+            params={
+                "format": "csvdata",
+                "startPeriod": start.isoformat(),
+                "endPeriod": end.isoformat(),
+            },
+            timeout=60,
             headers={"Accept": "text/csv"},
         )
         r.raise_for_status()
@@ -191,10 +230,13 @@ def parse_nyfed_json(
             value = item.get("percentRate")
             if value is None:
                 raise ValueError(f"Missing {rate_name} rate for {day}")
-            records.append(RateObservation(
-                f"NYFED_{rate_name}_USD_ON", day,
-                percent_to_decimal(str(value), rate_name),
-            ))
+            records.append(
+                RateObservation(
+                    f"NYFED_{rate_name}_USD_ON",
+                    day,
+                    percent_to_decimal(str(value), rate_name),
+                )
+            )
     return _unique(records)
 
 
