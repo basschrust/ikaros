@@ -23,6 +23,14 @@ uv run --no-sync python -m run.ikaros start
 - `status` checks GPW freshness and IIC failures; `stop-broker` stops Kafka without deleting volumes.
 - Default FX polling is **EURPLN=X only**; use `start --fx-symbols EURPLN=X USDPLN=X` for more direct pairs. GPW polling covers registered GPW securities. `--gpw-limit 3` is useful in a pilot.
 
+### Daily incremental update
+
+Refresh registered market data in Snowflake through yesterday.
+
+```powershell
+uv run --extra snowflake python -m run.update_all --write
+```
+
 **One-time backfill:** commands default to a read-only dry run; add `--write` after checking dates/symbols.
 
 ```powershell
