@@ -1,0 +1,114 @@
+"""Seed GPW or US securities into existing SECURITIES, dry run by default.
+
+CSV columns: ticker,name. US Yahoo symbols use '-' in class shares (BRK-B).
+"""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+import logging
+import re
+
+import pandas as pd
+
+
+LOG = logging.getLogger(__name__)
+VENUE_CCY = {"GPW": "PLN", "US": "USD"}
+US_TICKER = re.compile(r"^[A-Z][A-Z0-9.-]*$")
+
+
+def normalize_us_securities(frame: pd.DataFrame) -> pd.DataFrame:
+    if not {"ticker", "name"} <= set(frame.columns):
+        raise ValueError("CSV must contain ticker,name")
+    result = frame[["ticker", "name"]].copy()
+    if result.isna().any().any():
+        raise ValueError("Null ticker/name")
+    result["symbol"] = result["ticker"].str.strip().str.upper().str.replace(".", "-", regex=False)
+    result["name"] = result["name"].str.strip()
+    if (result["name"] == "").any() or not result["symbol"].map(
+        lambda s: bool(US_TICKER.fullmatch(s))
+    ).all():
+        raise ValueError("Invalid US security name/symbol")
+    if result["symbol"].duplicated().any():
+        raise ValueError("Duplicate Yahoo US symbols")
+    return result[["symbol", "name"]].reset_index(drop=True)
+
+
+def main(argv: list[str] | None = None, *, default_venue: str = "GPW") -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--venue", choices=VENUE_CCY, default=default_venue)
+    parser.add_argument("--csv", type=Path)
+    parser.add_argument("--write", action="store_true")
+    args = parser.parse_args(argv)
+    path = args.csv or Path("data/gpw_stocks.csv" if args.venue == "GPW" else "data/us_sp500.csv")
+    if not path.is_file():
+        parser.error(f"Missing CSV: {path}")
+    from config.config import load_config
+    from database.repositories.factory import repository_from_config
+    from ingestion.gpw_backfill import normalize_securities
+
+    raw = pd.read_csv(path, dtype=str)
+    securities = normalize_securities(raw) if args.venue == "GPW" else normalize_us_securities(raw)
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    config = load_config("database.yaml")
+    if config.get("database", {}).get("driver", "").lower() != "snowflake":
+        parser.error("Snowflake required")
+    with repository_from_config(config) as repo:
+        with repo.connection.cursor() as cur:
+            cur.execute('SELECT "SYMBOL", "ASSET_ID", "VENUE", "CURRENCY" FROM "SECURITIES"')
+            by_symbol = {}
+            for sym, asset_id, venue, currency in cur.fetchall():
+                if sym in by_symbol:
+                    raise RuntimeError(f"Duplicate existing security: {sym}")
+                by_symbol[str(sym)] = (int(asset_id), venue, currency)
+            for sym in securities["symbol"]:
+                if sym in by_symbol and by_symbol[sym][1:] != (args.venue, VENUE_CCY[args.venue]):
+                    raise RuntimeError(f"Security {sym}: conflicting venue/currency")
+            unseen = securities[~securities["symbol"].isin(by_symbol)]
+            LOG.info(
+                "venue=%s csv=%d existing=%d new=%d write=%s",
+                args.venue,
+                len(securities),
+                len(securities) - len(unseen),
+                len(unseen),
+                args.write,
+            )
+            if not args.write or unseen.empty:
+                return
+            # Same sequential-ID strategy as existing GPW seeder. Do not run seeders concurrently.
+            try:
+                cur.execute("BEGIN")
+                cur.execute('SELECT COALESCE(MAX("ASSET_ID"), 0) FROM "SECURITIES"')
+                next_id = int(cur.fetchone()[0])
+                params = []
+                for row in unseen.itertuples(index=False):
+                    next_id += 1
+                    params.append(
+                        (
+                            next_id,
+                            "stock",
+                            "continuous",
+                            row.name,
+                            row.symbol,
+                            VENUE_CCY[args.venue],
+                            0,
+                            None,
+                            args.venue,
+                        )
+                    )
+                cur.executemany(
+                    'INSERT INTO "SECURITIES" ("ASSET_ID", "INSTRUMENT_CLASS", '
+                    '"MARKET_TYPE", "NAME", "SYMBOL", "CURRENCY", "CALENDAR_ID", '
+                    '"INIT_DATE", "VENUE") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)',
+                    params,
+                )
+                cur.execute("COMMIT")
+            except Exception:
+                cur.execute("ROLLBACK")
+                raise
+            LOG.info("Registered %d %s securities", len(unseen), args.venue)
+
+
+if __name__ == "__main__":
+    main()

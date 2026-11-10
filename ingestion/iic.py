@@ -1,8 +1,7 @@
 """Ikaros Ingestion Control (IIC): persistent Snowflake batch checkpoints.
 
-This initial implementation assumes one IIC writer at a time. Snowflake's
-standard-table UNIQUE constraints are informational, not enforced. Use a
-single scheduler until an atomic claim mechanism is introduced.
+Assumes one IIC writer at a time. Snowflake standard-table UNIQUE constraints
+are informational, not enforced; use a single scheduler.
 """
 
 from __future__ import annotations
@@ -31,8 +30,8 @@ class BatchKey:
     end: date
 
     def __post_init__(self):
-        if self.dataset not in {"FX", "GPW"}:
-            raise ValueError("dataset must be FX or GPW")
+        if self.dataset not in {"FX", "GPW", "US"}:
+            raise ValueError("dataset must be FX, GPW or US")
         if not self.symbol or not self.provider:
             raise ValueError("symbol/provider cannot be empty")
         if self.start > self.end:
@@ -54,7 +53,6 @@ def should_run(
     force: bool = False,
     retry_no_data: bool = False,
 ) -> tuple[bool, str]:
-    """Pure planning rule, independent of Snowflake."""
     if lease_minutes < 1:
         raise ValueError("lease_minutes must be positive")
     if state is None:
@@ -110,10 +108,10 @@ def _params(key: BatchKey) -> tuple:
 
 
 class SnowflakeIIC:
-    """Simple checkpoint store. Does not own the Snowflake connection.
+    """Checkpoint store, independent of its Snowflake connection.
 
-    No transaction spans an HTTP provider call. A crash after market-data MERGE
-    but before marking SUCCESS is safe: the next run repeats the idempotent MERGE.
+    No transaction spans HTTP calls; restarting an interrupted batch is safe
+    because the price MERGE is idempotent.
     """
 
     def __init__(self, connection):
