@@ -14,7 +14,8 @@ import pandas as pd
 
 
 LOG = logging.getLogger(__name__)
-VENUE_CCY = {"GPW": "PLN", "US": "USD"}
+VENUE_CCY = {"GPW": "PLN", "US": "USD", "PSE": "CZK", "XETRA": "EUR", "PARIS": "EUR"}
+VENUE_SUFFIX = {"PSE": ".PR", "XETRA": ".DE", "PARIS": ".PA"}
 US_TICKER = re.compile(r"^[A-Z][A-Z0-9.-]*$")
 
 
@@ -35,13 +36,46 @@ def normalize_us_securities(frame: pd.DataFrame) -> pd.DataFrame:
     return result[["symbol", "name"]].reset_index(drop=True)
 
 
+def normalize_europe_securities(frame: pd.DataFrame, venue: str) -> pd.DataFrame:
+    """Normalize an explicit, reviewed Yahoo listing-symbol CSV.
+
+    Czech/German/French listings retain the Yahoo suffix; unlike US share
+    classes, the dot is not replaced by a dash.
+    """
+    if venue not in VENUE_SUFFIX:
+        raise ValueError(f"Unsupported European venue: {venue}")
+    if not {"ticker", "name"} <= set(frame.columns):
+        raise ValueError("CSV must contain ticker,name")
+    result = frame[["ticker", "name"]].copy()
+    if result.isna().any().any():
+        raise ValueError("Null ticker/name")
+    result["symbol"] = result["ticker"].str.strip().str.upper()
+    result["name"] = result["name"].str.strip()
+    suffix = VENUE_SUFFIX[venue]
+    valid = result["symbol"].map(
+        lambda s: bool(re.fullmatch(r"[A-Z0-9][A-Z0-9.-]*", s)) and s.endswith(suffix)
+    )
+    if not valid.all() or (result["name"] == "").any():
+        raise ValueError(f"Invalid {venue} Yahoo ticker/name; expected suffix {suffix}")
+    if result["symbol"].duplicated().any():
+        raise ValueError(f"Duplicate {venue} Yahoo symbols")
+    return result[["symbol", "name"]].reset_index(drop=True)
+
+
 def main(argv: list[str] | None = None, *, default_venue: str = "GPW") -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--venue", choices=VENUE_CCY, default=default_venue)
     parser.add_argument("--csv", type=Path)
     parser.add_argument("--write", action="store_true")
     args = parser.parse_args(argv)
-    path = args.csv or Path("data/gpw_stocks.csv" if args.venue == "GPW" else "data/us_sp500.csv")
+    defaults = {
+        "GPW": "data/gpw_stocks.csv",
+        "US": "data/us_sp500.csv",
+        "PSE": "data/europe_pse.csv",
+        "XETRA": "data/europe_xetra.csv",
+        "PARIS": "data/europe_paris.csv",
+    }
+    path = args.csv or Path(defaults[args.venue])
     if not path.is_file():
         parser.error(f"Missing CSV: {path}")
     from config.config import load_config
@@ -49,7 +83,13 @@ def main(argv: list[str] | None = None, *, default_venue: str = "GPW") -> None:
     from ingestion.gpw_backfill import normalize_securities
 
     raw = pd.read_csv(path, dtype=str)
-    securities = normalize_securities(raw) if args.venue == "GPW" else normalize_us_securities(raw)
+    securities = (
+        normalize_securities(raw)
+        if args.venue == "GPW"
+        else normalize_us_securities(raw)
+        if args.venue == "US"
+        else normalize_europe_securities(raw, args.venue)
+    )
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     config = load_config("database.yaml")
     if config.get("database", {}).get("driver", "").lower() != "snowflake":

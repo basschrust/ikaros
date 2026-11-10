@@ -20,8 +20,8 @@ YAHOO_FX = frozenset(
 )
 
 # Keep FW20 selectable for old operators; DERIVATIVES supersedes it in defaults.
-DATASETS = ("GPW", "US", "FX", "WIG20", "FW20", "DERIVATIVES", "RATES")
-DEFAULT_DATASETS = ("GPW", "US", "FX", "WIG20", "DERIVATIVES", "RATES")
+DATASETS = ("GPW", "US", "PSE", "XETRA", "PARIS", "FX", "WIG20", "FW20", "DERIVATIVES", "RATES")
+DEFAULT_DATASETS = ("GPW", "US", "PSE", "XETRA", "PARIS", "FX", "WIG20", "DERIVATIVES", "RATES")
 DERIVATIVE_EMPTY_LOOKBACK_DAYS = 7
 
 
@@ -64,7 +64,7 @@ def as_date(value) -> date | None:
 
 def fetch_inventory(connection, dataset: str) -> list[Instrument]:
     """Retain registered instruments without any observations."""
-    if dataset in {"GPW", "US"}:
+    if dataset in {"GPW", "US", "PSE", "XETRA", "PARIS"}:
         sql = '''SELECT s."SYMBOL", MAX(TO_DATE(p."DATE"))
                  FROM "SECURITIES" s LEFT JOIN "PRICES" p ON p."SYMBOL" = s."SYMBOL"
                  WHERE s."VENUE" = %s
@@ -209,7 +209,7 @@ def build_plan(
                     skipped.append(f"DERIVATIVES {symbol}: {duration} days exceeds max gap")
                     continue
                 derivative_groups[(start, target)].append(symbol)
-            elif source in {"GPW", "US", "FX-YAHOO", "FX-NBP"}:
+            elif source in {"GPW", "US", "PSE", "XETRA", "PARIS", "FX-YAHOO", "FX-NBP"}:
                 if duration > max_gap_days:
                     skipped.append(
                         f"{dataset} {symbol}: {start}..{target} exceeds --max-gap-days={max_gap_days}; run explicit backfill"
@@ -240,7 +240,7 @@ def build_plan(
                 groups[(source, start)].append(symbol)
     for (source, start), symbols in sorted(groups.items(), key=lambda x: (x[0][0], x[0][1])):
         for chunk in _chunks(sorted(set(symbols)), batch_size):
-            if source in {"GPW", "US"}:
+            if source in {"GPW", "US", "PSE", "XETRA", "PARIS"}:
                 argv = worker(
                     "run.backfill_equities",
                     "--venue",
@@ -328,12 +328,15 @@ def build_plan(
     priority = {
         "GPW": 0,
         "US": 1,
-        "FX-YAHOO": 2,
-        "FX-NBP": 3,
-        "WIG20": 4,
-        "FW20": 5,
-        "DERIVATIVES": 5,
-        "RATES": 6,
+        "PSE": 2,
+        "XETRA": 3,
+        "PARIS": 4,
+        "FX-YAHOO": 5,
+        "FX-NBP": 6,
+        "WIG20": 7,
+        "FW20": 8,
+        "DERIVATIVES": 8,
+        "RATES": 9,
     }
     jobs.sort(key=lambda j: (priority[j.dataset], j.start, j.symbols))
     return Plan(jobs, skipped, target)

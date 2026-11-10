@@ -1,4 +1,4 @@
-"""Shared GPW/US daily equity backfill; registered symbols only, insert-only MERGE.
+"""Shared multi-venue daily equity backfill; registered symbols only, insert-only MERGE.
 
 Example: python -m run.backfill_equities --venue US --start 2025-01-01 --end 2026-11-09 --write
 """
@@ -20,7 +20,7 @@ from ingestion.prices import fetch_eod_prices
 from ingestion.iic import BatchKey, SnowflakeIIC, Status
 
 LOG = logging.getLogger(__name__)
-VENUES = ("GPW", "US")
+VENUES = ("GPW", "US", "PSE", "XETRA", "PARIS")
 
 
 def registered_symbols(
