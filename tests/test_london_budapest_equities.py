@@ -52,7 +52,7 @@ def test_lse_price_conversion_and_budapest_unchanged():
     assert normalize_equity_quote_units(data, "BSE", "OTP.BD") is data
 
 
-def test_unverified_lse_and_ambiguous_dividends_rejected():
+def test_unverified_lse_and_ambiguous_dividends_rejected(caplog):
     frame = pd.DataFrame(
         {
             "open": [100],
@@ -62,11 +62,21 @@ def test_unverified_lse_and_ambiguous_dividends_rejected():
             "dividend": [None],
         }
     )
+
+    # Unverified London symbols must still be rejected.
     with pytest.raises(ValueError, match="not verified"):
         normalize_equity_quote_units(frame, "LSE", "UNKNOWN.L")
+
+    # Ambiguous dividend amounts are now discarded, not rejected.
     frame.loc[0, "dividend"] = 7.5
-    with pytest.raises(ValueError, match="dividends"):
-        normalize_equity_quote_units(frame, "LSE", "SHEL.L")
+
+    with caplog.at_level("WARNING"):
+        result = normalize_equity_quote_units(frame, "LSE", "SHEL.L")
+
+    assert result.loc[0, "close"] == 1.0
+    assert pd.isna(result.loc[0, "dividend"])
+    assert frame.loc[0, "dividend"] == 7.5
+    assert "dividend" in caplog.text.lower()
 
 
 def test_incremental_planner():
