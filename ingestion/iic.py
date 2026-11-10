@@ -30,8 +30,8 @@ class BatchKey:
     end: date
 
     def __post_init__(self):
-        if self.dataset not in {"FX", "GPW", "US", "PSE", "XETRA", "PARIS"}:
-            raise ValueError("dataset must be FX, GPW, US, PSE, XETRA or PARIS")
+        if self.dataset not in {"FX", "GPW", "US", "PSE", "XETRA", "PARIS", "LSE", "BSE"}:
+            raise ValueError("dataset must be FX, GPW, US, PSE, XETRA, PARIS, LSE or BSE")
         if not self.symbol or not self.provider:
             raise ValueError("symbol/provider cannot be empty")
         if self.start > self.end:

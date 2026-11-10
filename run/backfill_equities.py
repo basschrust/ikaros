@@ -20,7 +20,45 @@ from ingestion.prices import fetch_eod_prices
 from ingestion.iic import BatchKey, SnowflakeIIC, Status
 
 LOG = logging.getLogger(__name__)
-VENUES = ("GPW", "US", "PSE", "XETRA", "PARIS")
+
+# Pilot listings explicitly verified as GBp-quoted on Yahoo Finance.
+# Never assume every LSE listing is pence-quoted: some trade in GBP or USD.
+LSE_PENCE_SYMBOLS = frozenset({"SHEL.L", "BP.L", "HSBA.L", "ULVR.L", "LSEG.L"})
+
+
+def normalize_equity_quote_units(frame: pd.DataFrame, venue: str, symbol: str) -> pd.DataFrame:
+    """Convert verified LSE GBp OHLC to GBP without guessing dividend units.
+
+    Yahoo/OpenBB dividend records do not carry a verified event currency. Keep
+    zeros (which are unit-independent), set nonzero London dividends to NULL
+    and warn. This preserves the candles but NOT complete dividend history.
+    Revisit before using London prices for dividend/total-return calculations.
+    """
+    if venue != "LSE" or frame.empty:
+        return frame
+    if symbol not in LSE_PENCE_SYMBOLS:
+        raise ValueError(
+            f"LSE quote units not verified for {symbol}; inspect Yahoo currency "
+            "and add an explicit conversion rule before ingestion"
+        )
+    result = frame.copy()
+    for field in ("open", "high", "low", "close"):
+        result[field] = pd.to_numeric(result[field], errors="coerce") / 100
+    if "dividend" in result.columns:
+        dividend = pd.to_numeric(result["dividend"], errors="coerce")
+        uncertain = dividend.notna() & dividend.ne(0)
+        if uncertain.any():
+            LOG.warning(
+                "LSE %s: %d dividend observation(s) set to NULL; "
+                "Yahoo/OpenBB dividend denomination not verified",
+                symbol,
+                int(uncertain.sum()),
+            )
+        result["dividend"] = dividend.mask(uncertain)
+    return result
+
+
+VENUES = ("GPW", "US", "PSE", "XETRA", "PARIS", "LSE", "BSE")
 
 
 def registered_symbols(
@@ -157,6 +195,7 @@ def main(argv: list[str] | None = None, *, default_venue: str = "GPW") -> None:
                         if iic:
                             iic.finish(key, Status.NO_DATA)
                         continue
+                    fetched = normalize_equity_quote_units(fetched, args.venue, symbol)
                     clean = normalize_prices(fetched, symbol, begin, end, skip_invalid=True)
                     if clean.empty:
                         LOG.warning("NO_VALID_DATA %s %s..%s", symbol, begin, end)

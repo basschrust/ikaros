@@ -14,8 +14,16 @@ import pandas as pd
 
 
 LOG = logging.getLogger(__name__)
-VENUE_CCY = {"GPW": "PLN", "US": "USD", "PSE": "CZK", "XETRA": "EUR", "PARIS": "EUR"}
-VENUE_SUFFIX = {"PSE": ".PR", "XETRA": ".DE", "PARIS": ".PA"}
+VENUE_CCY = {
+    "GPW": "PLN",
+    "US": "USD",
+    "PSE": "CZK",
+    "XETRA": "EUR",
+    "PARIS": "EUR",
+    "LSE": "GBP",
+    "BSE": "HUF",
+}
+VENUE_SUFFIX = {"PSE": ".PR", "XETRA": ".DE", "PARIS": ".PA", "LSE": ".L", "BSE": ".BD"}
 US_TICKER = re.compile(r"^[A-Z][A-Z0-9.-]*$")
 
 
@@ -74,6 +82,8 @@ def main(argv: list[str] | None = None, *, default_venue: str = "GPW") -> None:
         "PSE": "data/europe_pse.csv",
         "XETRA": "data/europe_xetra.csv",
         "PARIS": "data/europe_paris.csv",
+        "LSE": "data/europe_lse.csv",
+        "BSE": "data/europe_bse.csv",
     }
     path = args.csv or Path(defaults[args.venue])
     if not path.is_file():

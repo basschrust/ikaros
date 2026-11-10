@@ -20,8 +20,33 @@ YAHOO_FX = frozenset(
 )
 
 # Keep FW20 selectable for old operators; DERIVATIVES supersedes it in defaults.
-DATASETS = ("GPW", "US", "PSE", "XETRA", "PARIS", "FX", "WIG20", "FW20", "DERIVATIVES", "RATES")
-DEFAULT_DATASETS = ("GPW", "US", "PSE", "XETRA", "PARIS", "FX", "WIG20", "DERIVATIVES", "RATES")
+DATASETS = (
+    "GPW",
+    "US",
+    "PSE",
+    "XETRA",
+    "PARIS",
+    "LSE",
+    "BSE",
+    "FX",
+    "WIG20",
+    "FW20",
+    "DERIVATIVES",
+    "RATES",
+)
+DEFAULT_DATASETS = (
+    "GPW",
+    "US",
+    "PSE",
+    "XETRA",
+    "PARIS",
+    "LSE",
+    "BSE",
+    "FX",
+    "WIG20",
+    "DERIVATIVES",
+    "RATES",
+)
 DERIVATIVE_EMPTY_LOOKBACK_DAYS = 7
 
 
@@ -64,7 +89,7 @@ def as_date(value) -> date | None:
 
 def fetch_inventory(connection, dataset: str) -> list[Instrument]:
     """Retain registered instruments without any observations."""
-    if dataset in {"GPW", "US", "PSE", "XETRA", "PARIS"}:
+    if dataset in {"GPW", "US", "PSE", "XETRA", "PARIS", "LSE", "BSE"}:
         sql = '''SELECT s."SYMBOL", MAX(TO_DATE(p."DATE"))
                  FROM "SECURITIES" s LEFT JOIN "PRICES" p ON p."SYMBOL" = s."SYMBOL"
                  WHERE s."VENUE" = %s
@@ -209,7 +234,17 @@ def build_plan(
                     skipped.append(f"DERIVATIVES {symbol}: {duration} days exceeds max gap")
                     continue
                 derivative_groups[(start, target)].append(symbol)
-            elif source in {"GPW", "US", "PSE", "XETRA", "PARIS", "FX-YAHOO", "FX-NBP"}:
+            elif source in {
+                "GPW",
+                "US",
+                "PSE",
+                "XETRA",
+                "PARIS",
+                "LSE",
+                "BSE",
+                "FX-YAHOO",
+                "FX-NBP",
+            }:
                 if duration > max_gap_days:
                     skipped.append(
                         f"{dataset} {symbol}: {start}..{target} exceeds --max-gap-days={max_gap_days}; run explicit backfill"
@@ -240,7 +275,7 @@ def build_plan(
                 groups[(source, start)].append(symbol)
     for (source, start), symbols in sorted(groups.items(), key=lambda x: (x[0][0], x[0][1])):
         for chunk in _chunks(sorted(set(symbols)), batch_size):
-            if source in {"GPW", "US", "PSE", "XETRA", "PARIS"}:
+            if source in {"GPW", "US", "PSE", "XETRA", "PARIS", "LSE", "BSE"}:
                 argv = worker(
                     "run.backfill_equities",
                     "--venue",
@@ -331,12 +366,14 @@ def build_plan(
         "PSE": 2,
         "XETRA": 3,
         "PARIS": 4,
-        "FX-YAHOO": 5,
-        "FX-NBP": 6,
-        "WIG20": 7,
-        "FW20": 8,
-        "DERIVATIVES": 8,
-        "RATES": 9,
+        "LSE": 5,
+        "BSE": 6,
+        "FX-YAHOO": 7,
+        "FX-NBP": 8,
+        "WIG20": 9,
+        "FW20": 10,
+        "DERIVATIVES": 10,
+        "RATES": 11,
     }
     jobs.sort(key=lambda j: (priority[j.dataset], j.start, j.symbols))
     return Plan(jobs, skipped, target)
