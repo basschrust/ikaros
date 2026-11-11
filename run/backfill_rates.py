@@ -1,4 +1,4 @@
-"""Official rate histories: UST, ECB AAA, NY Fed, BoE, ECB €STR, SNB.
+"""Official rate histories: UST, ECB AAA, NY Fed, BoE, ECB €STR, SNB, NBP, CNB, MNB.
 
 Dry-run by default; --write persists to existing Ikaros RATE tables.
 """
@@ -25,6 +25,13 @@ from ikaros_app.rates_international import (
     ECBESTRProvider,
     SNBPolicyProvider,
     configured_series as international_series,
+)
+
+from ikaros_app.rates_central_europe import (
+    NBPPolicyProvider,
+    CNBPolicyProvider,
+    MNBPolicyProvider,
+    configured_series as central_europe_series,
 )
 
 LOG = logging.getLogger(__name__)
@@ -117,7 +124,11 @@ def select_series(series_ids: list[str] | None):
     overlap = set(existing) & set(extended)
     if overlap:
         raise ValueError(f"Duplicate configured rate IDs: {sorted(overlap)}")
-    catalog = {**existing, **extended}
+    central = central_europe_series()
+    overlap = (set(existing) | set(extended)) & set(central)
+    if overlap:
+        raise ValueError(f"Duplicate configured rate IDs: {sorted(overlap)}")
+    catalog = {**existing, **extended, **central}
     wanted = set(series_ids) if series_ids is not None else set(catalog)
     unknown = wanted - set(catalog)
     if unknown:
@@ -147,6 +158,9 @@ def main() -> None:
             BoERatesProvider(),
             ECBESTRProvider(),
             SNBPolicyProvider(),
+            NBPPolicyProvider(),
+            CNBPolicyProvider(),
+            MNBPolicyProvider(),
         ):
             if provider.source not in sources:
                 continue
