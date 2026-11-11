@@ -12,8 +12,13 @@ EXPIRY = date(2026, 11, 20)
 def row(**kw):
     return dict(
         contractSymbol="AAPL261120C00200000",
-        strike=200.0, bid=3.5, ask=3.6, lastPrice=3.55,
-        volume=120, openInterest=840, impliedVolatility=0.24,
+        strike=200.0,
+        bid=3.5,
+        ask=3.6,
+        lastPrice=3.55,
+        volume=120,
+        openInterest=840,
+        impliedVolatility=0.24,
         lastTradeDate="2026-11-10T15:30:00Z",
         **kw,
     )

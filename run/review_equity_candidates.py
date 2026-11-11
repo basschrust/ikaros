@@ -23,7 +23,12 @@ import pandas as pd
 from ikaros_app.update import yesterday_warsaw
 
 LOG = logging.getLogger(__name__)
-VENUES = {"PSE": (".PR", "CZK"), "XETRA": (".DE", "EUR"), "PARIS": (".PA", "EUR"), "BSE": (".BD", "HUF")}
+VENUES = {
+    "PSE": (".PR", "CZK"),
+    "XETRA": (".DE", "EUR"),
+    "PARIS": (".PA", "EUR"),
+    "BSE": (".BD", "HUF"),
+}
 
 
 def normalized_candidates(path: Path, venue: str) -> list[tuple[str, str]]:
@@ -97,7 +102,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--lookback-days", type=int, default=35)
     p.add_argument("--min-sessions", type=int, default=5)
     p.add_argument("--max-stale-days", type=int, default=7)
-    p.add_argument("--price-only", action="store_true", help="Bypass Yahoo currency metadata ONLY after manual review")
+    p.add_argument(
+        "--price-only",
+        action="store_true",
+        help="Bypass Yahoo currency metadata ONLY after manual review",
+    )
     a = p.parse_args(argv)
     if a.lookback_days < 1 or a.min_sessions < 1 or a.max_stale_days < 0:
         p.error("Invalid lookback, session or freshness limits")
@@ -120,24 +129,32 @@ def main(argv: list[str] | None = None) -> None:
         currency = ""
         try:
             history = fetch_eod_prices(
-                symbol=symbol, start_date=begin.isoformat(),
+                symbol=symbol,
+                start_date=begin.isoformat(),
                 end_date=(a.through + timedelta(days=1)).isoformat(),
             )
             good, status = eligible(
-                history, through=a.through, lookback_days=a.lookback_days,
-                min_sessions=a.min_sessions, max_stale_days=a.max_stale_days,
+                history,
+                through=a.through,
+                lookback_days=a.lookback_days,
+                min_sessions=a.min_sessions,
+                max_stale_days=a.max_stale_days,
             )
             if good and not a.price_only:
                 currency = currency_for_symbol(symbol) or ""
                 if currency != expected_ccy:
-                    status = f"CURRENCY_UNVERIFIED_OR_MISMATCH:{currency or 'MISSING'}!= {expected_ccy}"
+                    status = (
+                        f"CURRENCY_UNVERIFIED_OR_MISMATCH:{currency or 'MISSING'}!= {expected_ccy}"
+                    )
                     good = False
             if good:
                 accepted.append((symbol, name))
         except Exception as exc:
             status = f"ERROR:{type(exc).__name__}:{exc}"
         LOG.info("%s %s %s", a.venue, symbol, status)
-        results.append((symbol, name, currency, status, "YES" if (symbol, name) in accepted else "NO"))
+        results.append(
+            (symbol, name, currency, status, "YES" if (symbol, name) in accepted else "NO")
+        )
     for path in (approved, report):
         path.parent.mkdir(parents=True, exist_ok=True)
     with approved.open("w", encoding="utf-8", newline="") as stream:
@@ -148,8 +165,15 @@ def main(argv: list[str] | None = None) -> None:
         writer = csv.writer(stream)
         writer.writerow(("ticker", "name", "currency", "detail", "approved"))
         writer.writerows(results)
-    LOG.info("%s reviewed=%d approved=%d rejected=%d; %s; %s",
-             a.venue, len(rows), len(accepted), len(rows) - len(accepted), approved, report)
+    LOG.info(
+        "%s reviewed=%d approved=%d rejected=%d; %s; %s",
+        a.venue,
+        len(rows),
+        len(accepted),
+        len(rows) - len(accepted),
+        approved,
+        report,
+    )
     if not accepted:
         raise SystemExit("No candidates approved; inspect report and Yahoo metadata")
 

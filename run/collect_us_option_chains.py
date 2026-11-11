@@ -23,11 +23,24 @@ import pandas as pd
 LOG = logging.getLogger(__name__)
 OCC = re.compile(r"^([A-Z]{1,6})(\d{6})([CP])(\d{8})$")
 FIELDS = (
-    "underlying", "contract_symbol", "expiry_date", "option_side", "strike", "currency",
-    "quote_date", "captured_at", "last_trade_at", "bid", "ask", "last_price",
-    "volume", "open_interest", "implied_volatility", "source",
+    "underlying",
+    "contract_symbol",
+    "expiry_date",
+    "option_side",
+    "strike",
+    "currency",
+    "quote_date",
+    "captured_at",
+    "last_trade_at",
+    "bid",
+    "ask",
+    "last_price",
+    "volume",
+    "open_interest",
+    "implied_volatility",
+    "source",
 )
-DDL = '''CREATE TABLE IF NOT EXISTS "US_OPTION_CHAIN_SNAPSHOTS" (
+DDL = """CREATE TABLE IF NOT EXISTS "US_OPTION_CHAIN_SNAPSHOTS" (
     "UNDERLYING" VARCHAR NOT NULL,
     "CONTRACT_SYMBOL" VARCHAR NOT NULL,
     "EXPIRY_DATE" DATE NOT NULL,
@@ -40,9 +53,9 @@ DDL = '''CREATE TABLE IF NOT EXISTS "US_OPTION_CHAIN_SNAPSHOTS" (
     "BID" FLOAT, "ASK" FLOAT, "LAST_PRICE" FLOAT,
     "VOLUME" FLOAT, "OPEN_INTEREST" FLOAT, "IMPLIED_VOLATILITY" FLOAT,
     "SOURCE" VARCHAR NOT NULL
-)'''
+)"""
 STAGE = 'CREATE TEMP TABLE IF NOT EXISTS "IKAROS_US_OPTION_SNAPSHOT_STAGE" LIKE "US_OPTION_CHAIN_SNAPSHOTS"'
-MERGE = '''MERGE INTO "US_OPTION_CHAIN_SNAPSHOTS" t
+MERGE = """MERGE INTO "US_OPTION_CHAIN_SNAPSHOTS" t
     USING "IKAROS_US_OPTION_SNAPSHOT_STAGE" s
     ON t."CONTRACT_SYMBOL" = s."CONTRACT_SYMBOL" AND t."QUOTE_DATE" = s."QUOTE_DATE"
     WHEN MATCHED THEN UPDATE SET
@@ -59,7 +72,7 @@ MERGE = '''MERGE INTO "US_OPTION_CHAIN_SNAPSHOTS" t
       s."STRIKE", s."CURRENCY", s."QUOTE_DATE", s."CAPTURED_AT", s."LAST_TRADE_AT",
       s."BID", s."ASK", s."LAST_PRICE", s."VOLUME", s."OPEN_INTEREST",
       s."IMPLIED_VOLATILITY", s."SOURCE"
-    )'''
+    )"""
 
 
 def optional_number(value, field: str) -> float | None:
@@ -80,8 +93,9 @@ def naive_utc(value) -> datetime | None:
     return timestamp.tz_convert("UTC").tz_localize(None).to_pydatetime()
 
 
-def normalize_chain(underlying: str, expiry: date, side: str, frame: pd.DataFrame,
-                    captured_at: datetime) -> list[dict]:
+def normalize_chain(
+    underlying: str, expiry: date, side: str, frame: pd.DataFrame, captured_at: datetime
+) -> list[dict]:
     """Normalize raw Yahoo chain; reject contract/expiry inconsistencies.
 
     OCC root can differ from current underlying for adjusted contracts; those are
@@ -124,7 +138,9 @@ def normalize_chain(underlying: str, expiry: date, side: str, frame: pd.DataFram
             "last_price": optional_number(rec.get("lastPrice"), "lastPrice"),
             "volume": optional_number(rec.get("volume"), "volume"),
             "open_interest": optional_number(rec.get("openInterest"), "openInterest"),
-            "implied_volatility": optional_number(rec.get("impliedVolatility"), "impliedVolatility"),
+            "implied_volatility": optional_number(
+                rec.get("impliedVolatility"), "impliedVolatility"
+            ),
             "source": "yfinance|option_chain",
         }
         if row["bid"] is not None and row["ask"] is not None and row["bid"] > row["ask"]:
@@ -136,7 +152,9 @@ def normalize_chain(underlying: str, expiry: date, side: str, frame: pd.DataFram
     return result
 
 
-def fetch_chains(symbol: str, *, max_expirations: int = 2, asof: datetime | None = None) -> list[dict]:
+def fetch_chains(
+    symbol: str, *, max_expirations: int = 2, asof: datetime | None = None
+) -> list[dict]:
     import yfinance as yf
 
     if not re.fullmatch(r"[A-Z]{1,5}", symbol):
@@ -180,9 +198,13 @@ def persist(connection, rows: list[dict]) -> None:
         return
     if len({(r["contract_symbol"], r["quote_date"]) for r in rows}) != len(rows):
         raise ValueError("Duplicate contract/date in snapshot")
-    insert = ('INSERT INTO "IKAROS_US_OPTION_SNAPSHOT_STAGE" ('
-              + ",".join(f'"{x.upper()}"' for x in FIELDS) + ") VALUES ("
-              + ",".join(["%s"] * len(FIELDS)) + ")")
+    insert = (
+        'INSERT INTO "IKAROS_US_OPTION_SNAPSHOT_STAGE" ('
+        + ",".join(f'"{x.upper()}"' for x in FIELDS)
+        + ") VALUES ("
+        + ",".join(["%s"] * len(FIELDS))
+        + ")"
+    )
     params = [tuple(r[field] for field in FIELDS) for r in rows]
     with closing(connection.cursor()) as cur:
         cur.execute(DDL)
