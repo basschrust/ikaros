@@ -1,7 +1,6 @@
-"""Load US Treasury par, ECB AAA spot and NY Fed overnight reference rates into the Ikaros schema.
+"""Official rate histories: UST, ECB AAA, NY Fed, BoE, ECB €STR, SNB.
 
-No new repository or external dependencies. Dry-run by default; --write merges
-by (series_id, observation date). Source values are normalized percent->decimal.
+Dry-run by default; --write persists to existing Ikaros RATE tables.
 """
 
 from __future__ import annotations
@@ -21,6 +20,12 @@ from ikaros_app.rates import (
     NYFedOvernightProvider,
     selected_sources,
 )
+from ikaros_app.rates_international import (
+    BoERatesProvider,
+    ECBESTRProvider,
+    SNBPolicyProvider,
+    configured_series as international_series,
+)
 
 LOG = logging.getLogger(__name__)
 
@@ -39,11 +44,10 @@ SCHEMA_DDL = (
 
 
 def persist(connection, series, observations) -> int:
-    """Idempotent batch insertion; refuse reference conflicts or foreign-source overwrite."""
+    """Idempotent batch insertion; refuse conflicting references or source overwrite."""
     if not observations:
         return 0
     with connection.cursor() as cur:
-        # DDL outside the transaction, as Snowflake DDL auto-commits.
         for ddl in SCHEMA_DDL:
             cur.execute(ddl)
         cur.execute("""CREATE TEMP TABLE IF NOT EXISTS "IKAROS_RATE_STAGE" (
@@ -106,6 +110,22 @@ def persist(connection, series, observations) -> int:
     return len(observations)
 
 
+def select_series(series_ids: list[str] | None):
+    """Combine both catalogs while keeping the legacy rates module unchanged."""
+    existing, _ = selected_sources(None)
+    extended = international_series()
+    overlap = set(existing) & set(extended)
+    if overlap:
+        raise ValueError(f"Duplicate configured rate IDs: {sorted(overlap)}")
+    catalog = {**existing, **extended}
+    wanted = set(series_ids) if series_ids is not None else set(catalog)
+    unknown = wanted - set(catalog)
+    if unknown:
+        raise ValueError(f"Unknown rate series: {', '.join(sorted(unknown))}")
+    selected = {s: catalog[s] for s in sorted(wanted)}
+    return selected, {r.source for r in selected.values()}
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--start", type=date.fromisoformat, required=True)
@@ -115,12 +135,19 @@ def main() -> None:
     args = p.parse_args()
     if args.start > args.end:
         p.error("--start must not follow --end")
-    selected, sources = selected_sources(args.series)
+    selected, sources = select_series(args.series)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     all_observations = []
     with requests.Session() as session:
         session.headers.update({"User-Agent": "IkarosMarketData/1.0"})
-        for provider in (TreasuryYieldProvider(), ECBSpotYieldProvider(), NYFedOvernightProvider()):
+        for provider in (
+            TreasuryYieldProvider(),
+            ECBSpotYieldProvider(),
+            NYFedOvernightProvider(),
+            BoERatesProvider(),
+            ECBESTRProvider(),
+            SNBPolicyProvider(),
+        ):
             if provider.source not in sources:
                 continue
             values = provider.history(session, args.start, args.end)
