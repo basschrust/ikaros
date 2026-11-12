@@ -7,6 +7,8 @@ import logging
 
 import pandas as pd
 
+from ingestion.equity_quality import suspect_zero_volume
+
 LOG = logging.getLogger(__name__)
 
 PRICE_FIELDS = (
@@ -56,11 +58,12 @@ def normalize_prices(
     *,
     skip_invalid: bool = False,
 ) -> pd.DataFrame:
-    """Normalize daily prices, optionally skipping invalid candles.
+    """Normalize daily prices and reject suspicious zero-volume GPW candles.
 
-    Default remains strict for backfill diagnostics and existing callers.
-    Routine updates can use ``skip_invalid=True`` to keep valid sessions
-    when the provider returns a null, nonpositive or non-finite close.
+    Zero volume plus a flat candle is suspicious for any equity; additionally,
+    PZU.WA has a liquid-security guard. Neither case may enter Snowflake on
+    routine incremental updates. Strict callers get an exception; routine
+    callers skip the observations and log their dates.
     """
     if frame.empty:
         return pd.DataFrame(columns=list(PRICE_FIELDS))
@@ -78,7 +81,6 @@ def normalize_prices(
 
     bad_close = result["close"].isna() | result["close"].le(0)
     bad_volume = result["volume"].lt(0)
-    # +/- infinity is not a valid price or volume, even though it isn't NaN.
     for col in ("open", "high", "low", "close", "volume", "dividend", "split_ratio"):
         bad_numeric = result[col].isin([float("inf"), float("-inf")])
         if col == "close":
@@ -86,15 +88,24 @@ def normalize_prices(
         else:
             bad_volume = bad_volume | bad_numeric
 
+    # Apply only to GPW securities; other venues must define their own
+    # validated liquidity/watchlist conventions.
+    suspect = (
+        suspect_zero_volume(result, symbol)
+        if symbol.endswith(".WA")
+        else pd.Series(False, index=result.index)
+    )
     if not skip_invalid:
         if bad_close.any():
             raise ValueError("Closing prices must be positive and non-null")
         if bad_volume.any():
             raise ValueError("Volume cannot be negative or non-finite")
+        if suspect.any():
+            raise ValueError(f"Suspicious zero-volume GPW candle(s) for {symbol}")
     else:
-        invalid = bad_close | bad_volume
+        invalid = bad_close | bad_volume | suspect
         for record in result.loc[invalid, ["date"]].itertuples(index=False):
-            LOG.warning("SKIP INVALID GPW CANDLE %s %s", symbol, record.date)
+            LOG.warning("SKIP INVALID EQUITY CANDLE %s %s", symbol, record.date)
         result = result.loc[~invalid].copy()
 
     return result.sort_values("date").reset_index(drop=True)

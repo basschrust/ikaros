@@ -45,6 +45,12 @@ from ikaros_app.rates_swiss_government import (
     configured_series as swiss_government_series,
 )
 
+from ikaros_app.rates_us_extended import (
+    TreasuryRealYieldProvider,
+    TreasuryBillYieldProvider,
+    configured_series as extended_us_series,
+)
+
 LOG = logging.getLogger(__name__)
 
 SCHEMA_DDL = (
@@ -56,7 +62,7 @@ SCHEMA_DDL = (
        "CREATED_AT" TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP())""",
     """CREATE TABLE IF NOT EXISTS "RATE_OBSERVATIONS" (
        "SERIES_ID" VARCHAR, "DATE" DATE, "RATE" FLOAT,
-       "SOURCE" VARCHAR,
+       "SOURCE" VARCHAR, "BID" FLOAT, "ASK" FLOAT,
        "INGESTED_AT" TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP())""",
 )
 
@@ -68,8 +74,12 @@ def persist(connection, series, observations) -> int:
     with connection.cursor() as cur:
         for ddl in SCHEMA_DDL:
             cur.execute(ddl)
+        # Existing Snowflake tables require explicit additive schema evolution.
+        cur.execute('ALTER TABLE "RATE_OBSERVATIONS" ADD COLUMN IF NOT EXISTS "BID" FLOAT')
+        cur.execute('ALTER TABLE "RATE_OBSERVATIONS" ADD COLUMN IF NOT EXISTS "ASK" FLOAT')
         cur.execute("""CREATE TEMP TABLE IF NOT EXISTS "IKAROS_RATE_STAGE" (
-            "SERIES_ID" VARCHAR, "DATE" DATE, "RATE" FLOAT, "SOURCE" VARCHAR)""")
+            "SERIES_ID" VARCHAR, "DATE" DATE, "RATE" FLOAT, "SOURCE" VARCHAR,
+            "BID" FLOAT, "ASK" FLOAT)""")
         try:
             cur.execute("BEGIN")
             for spec in series.values():
@@ -102,10 +112,17 @@ def persist(connection, series, observations) -> int:
             cur.execute('DELETE FROM "IKAROS_RATE_STAGE"')
             cur.executemany(
                 """INSERT INTO "IKAROS_RATE_STAGE"
-                ("SERIES_ID","DATE","RATE","SOURCE")
-                VALUES (%s,TO_DATE(%s),%s,%s)""",
+                ("SERIES_ID","DATE","RATE","SOURCE","BID","ASK")
+                VALUES (%s,TO_DATE(%s),%s,%s,%s,%s)""",
                 [
-                    (r.series_id, r.day.isoformat(), r.rate, series[r.series_id].source)
+                    (
+                        r.series_id,
+                        r.day.isoformat(),
+                        r.rate,
+                        series[r.series_id].source,
+                        getattr(r, "bid", None),
+                        getattr(r, "ask", None),
+                    )
                     for r in observations
                 ],
             )
@@ -118,9 +135,10 @@ def persist(connection, series, observations) -> int:
             cur.execute("""MERGE INTO "RATE_OBSERVATIONS" t USING "IKAROS_RATE_STAGE" s
                 ON t."SERIES_ID"=s."SERIES_ID" AND t."DATE"=s."DATE"
                 WHEN MATCHED THEN UPDATE SET t."RATE"=s."RATE",
+                    t."BID"=s."BID", t."ASK"=s."ASK",
                     t."INGESTED_AT"=CURRENT_TIMESTAMP()
-                WHEN NOT MATCHED THEN INSERT ("SERIES_ID","DATE","RATE","SOURCE")
-                    VALUES (s."SERIES_ID",s."DATE",s."RATE",s."SOURCE")""")
+                WHEN NOT MATCHED THEN INSERT ("SERIES_ID","DATE","RATE","SOURCE","BID","ASK")
+                    VALUES (s."SERIES_ID",s."DATE",s."RATE",s."SOURCE",s."BID",s."ASK")""")
             cur.execute("COMMIT")
         except Exception:
             cur.execute("ROLLBACK")
@@ -147,7 +165,13 @@ def select_series(series_ids: list[str] | None):
     overlap = (set(existing) | set(extended) | set(central) | set(government)) & set(swiss)
     if overlap:
         raise ValueError(f"Duplicate Swiss government series IDs: {sorted(overlap)}")
-    catalog = {**existing, **extended, **central, **government, **swiss}
+    us_extended = extended_us_series()
+    overlap = (set(existing) | set(extended) | set(central) | set(government) | set(swiss)) & set(
+        us_extended
+    )
+    if overlap:
+        raise ValueError(f"Duplicate extended US series IDs: {sorted(overlap)}")
+    catalog = {**existing, **extended, **central, **government, **swiss, **us_extended}
     wanted = set(series_ids) if series_ids is not None else set(catalog)
     unknown = wanted - set(catalog)
     if unknown:
@@ -183,6 +207,8 @@ def main() -> None:
             BoEGiltYieldProvider(),
             EurostatGovYieldProvider(),
             SNBGovernmentYieldProvider(),
+            TreasuryRealYieldProvider(),
+            TreasuryBillYieldProvider(),
         ):
             if provider.source not in sources:
                 continue
