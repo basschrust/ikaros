@@ -60,6 +60,46 @@ def plan_repair(current: pd.DataFrame, replacement: pd.DataFrame, symbol: str) -
     return planned.sort_values("date").reset_index(drop=True)
 
 
+def plan_repair_partial(
+    current: pd.DataFrame, replacement: pd.DataFrame, symbol: str
+) -> tuple[pd.DataFrame, list[tuple[date, str]]]:
+    """Prepare only valid suspect dates; report missing/invalid sources individually.
+
+    Never repair stored normal-volume days. An ambiguous provider date or
+    wrong-symbol response fails the whole operation before any write.
+    """
+    flagged = current.loc[suspect_zero_volume(current, symbol)].copy()
+    if flagged.empty:
+        return replacement.iloc[0:0].copy(), []
+    required = {"symbol", "date", "open", "high", "low", "close", "volume"}
+    absent = required - set(replacement.columns)
+    if absent:
+        raise ValueError(f"Missing replacement columns: {sorted(absent)}")
+    source = replacement.copy()
+    if not source.empty and not source["symbol"].eq(symbol).all():
+        raise ValueError("Provider returned a different symbol")
+    source["date"] = pd.to_datetime(source["date"], errors="raise").dt.date
+    if source["date"].duplicated().any():
+        raise ValueError("Duplicate replacement dates; ambiguous provider response")
+    source = source.set_index("date", drop=False)
+    planned = []
+    problems: list[tuple[date, str]] = []
+    for day in sorted(flagged["date"]):
+        if day not in source.index:
+            problems.append((day, "MISSING_SOURCE"))
+            continue
+        row = source.loc[[day]].reset_index(drop=True)
+        try:
+            valid = validate_repair_candles(row, symbol)
+        except (ValueError, TypeError) as exc:
+            problems.append((day, f"INVALID_SOURCE: {exc}"))
+            continue
+        planned.append(valid)
+    empty = replacement.iloc[0:0].copy()
+    result = pd.concat(planned, ignore_index=True) if planned else empty
+    return result, problems
+
+
 def apply_repair(connection, symbol: str, plan: pd.DataFrame) -> int:
     """Transactional updates guarded by prior zero volume and unique rowcount."""
     if plan.empty:
@@ -136,17 +176,32 @@ def main() -> None:
                 start_date=args.start.isoformat(),
                 end_date=(args.end + timedelta(days=1)).isoformat(),
             )
-        planned = plan_repair(current, raw, args.symbol)
-        print(planned[["date", "open", "high", "low", "close", "volume"]].to_string(index=False))
+        planned, problems = plan_repair_partial(current, raw, args.symbol)
+        print(f"Valid repairs={len(planned)} unresolved={len(problems)}")
+        if not planned.empty:
+            print(
+                planned[["date", "open", "high", "low", "close", "volume"]].to_string(index=False)
+            )
+        for day, reason in problems:
+            print(f"UNRESOLVED {args.symbol} {day}: {reason}")
         if not args.write:
             print("DRY RUN: nothing changed. Inspect prices and rerun with --write")
             return
+        if planned.empty:
+            raise RuntimeError(
+                "No usable replacement candles; nothing written. "
+                "The current Yahoo/OpenBB feed is still defective for these dates. "
+                "Supply independently verified --csv OHLCV observations."
+            )
         count = apply_repair(repo.connection, args.symbol, planned)
         verified = load_current(repo.connection, args.symbol, args.start, args.end)
         remaining = verified.loc[suspect_zero_volume(verified, args.symbol)]
+        print(f"REPAIRED {count} rows for {args.symbol}; remaining suspect={len(remaining)}")
         if not remaining.empty:
-            raise RuntimeError(f"Repair incomplete: {remaining['date'].tolist()}")
-        print(f"REPAIRED {count} rows for {args.symbol}")
+            raise RuntimeError(
+                f"Partial repair completed; unresolved dates: {remaining['date'].tolist()}. "
+                "Supply independently verified --csv OHLCV for remaining dates."
+            )
 
 
 if __name__ == "__main__":
