@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 
 from matplotlib.ticker import FuncFormatter, FixedLocator
+from snowflake.connector import SnowflakeConnection
 
 TENOR_RE = re.compile(r"^(\d+)([DWMY])$")
 TENOR_YEARS = {"D": 1 / 365.25, "W": 7 / 365.25, "M": 1 / 12, "Y": 1.0}
@@ -40,7 +41,9 @@ def years_from_tenor(tenor: str) -> float | None:
     return amount * TENOR_YEARS[match.group(2)]
 
 
-def fetch_points(connection, as_of: date, currencies: list[str] | None = None) -> list[YieldPoint]:
+def fetch_points(
+    connection: SnowflakeConnection, as_of: date, currencies: list[str] | None = None
+) -> list[YieldPoint]:
     """Latest observation per series on or before as_of. No look-ahead."""
     sql = """SELECT s."SERIES_ID", s."CURRENCY", s."SOURCE", s."CURVE_TYPE",
                     s."TENOR", s."COMPOUNDING", o."DATE", o."RATE"

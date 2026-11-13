@@ -12,6 +12,7 @@ from datetime import date, datetime
 from io import StringIO
 import math
 import re
+from requests import Session
 
 from ikaros_app.rates import RateSeries, percent_to_decimal
 
@@ -184,7 +185,7 @@ def parse_bill_csv(content: str, start: date, end: date) -> list[QuoteableRateOb
 class TreasuryRealYieldProvider:
     source = SOURCE_REAL
 
-    def history(self, session, start: date, end: date) -> list[QuoteableRateObservation]:
+    def history(self, session: Session, start: date, end: date) -> list[QuoteableRateObservation]:
         rows = []
         for year in range(start.year, end.year + 1):
             response = session.get(
@@ -204,7 +205,7 @@ class TreasuryRealYieldProvider:
 class TreasuryBillYieldProvider:
     source = SOURCE_BILL
 
-    def history(self, session, start: date, end: date) -> list[QuoteableRateObservation]:
+    def history(self, session: Session, start: date, end: date) -> list[QuoteableRateObservation]:
         rows = []
         for year in range(start.year, end.year + 1):
             response = session.get(

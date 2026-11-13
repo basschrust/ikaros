@@ -11,6 +11,7 @@ import csv
 from datetime import date
 from io import StringIO
 import re
+from requests import Session
 
 from ikaros_app.rates import RateObservation, RateSeries, _unique, percent_to_decimal
 
@@ -89,7 +90,7 @@ def parse_snb_government_csv(content: str, start: date, end: date) -> list[RateO
 class SNBGovernmentYieldProvider:
     source = SOURCE
 
-    def history(self, session, start: date, end: date) -> list[RateObservation]:
+    def history(self, session: Session, start: date, end: date) -> list[RateObservation]:
         response = session.get(
             URL,
             params={

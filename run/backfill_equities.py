@@ -11,6 +11,7 @@ from datetime import date, timedelta
 import logging
 
 import pandas as pd
+from snowflake.connector import SnowflakeConnection
 
 from config.config import load_config
 from database.repositories.factory import repository_from_config
@@ -49,14 +50,14 @@ def normalize_equity_quote_units(frame: pd.DataFrame, venue: str, symbol: str) -
 
 
 def registered_symbols(
-    conn, symbols: list[str] | None, limit: int | None, venue: str = "GPW"
+    conn: SnowflakeConnection, symbols: list[str] | None, limit: int | None, venue: str = "GPW"
 ) -> list[str]:
     if venue not in VENUES:
         raise ValueError(f"Unsupported equity venue {venue}")
     with closing(conn.cursor()) as cur:
         cur.execute(
-            'SELECT "SYMBOL" FROM "SECURITIES" WHERE "VENUE" = %s ORDER BY "SYMBOL"',
-            (venue,),
+            command='SELECT "SYMBOL" FROM "SECURITIES" WHERE "VENUE" = %s ORDER BY "SYMBOL"',
+            params=(venue,),
         )
         all_symbols = [str(row[0]) for row in cur.fetchall() if row[0]]
     if not all_symbols:
@@ -70,17 +71,17 @@ def registered_symbols(
     return all_symbols[:limit] if limit is not None else all_symbols
 
 
-def existing_dates(conn, symbol: str, start: date, end: date) -> set[date]:
+def existing_dates(conn: SnowflakeConnection, symbol: str, start: date, end: date) -> set[date]:
     with closing(conn.cursor()) as cur:
         cur.execute(
-            'SELECT DISTINCT TO_DATE("DATE") FROM "PRICES" '
+            command='SELECT DISTINCT TO_DATE("DATE") FROM "PRICES" '
             'WHERE "SYMBOL" = %s AND TO_DATE("DATE") BETWEEN %s AND %s',
-            (symbol, start.isoformat(), end.isoformat()),
+            params=(symbol, start.isoformat(), end.isoformat()),
         )
         return {row[0] for row in cur.fetchall()}
 
 
-def persist_batch(conn, frame: pd.DataFrame) -> int:
+def persist_batch(conn: SnowflakeConnection, frame: pd.DataFrame) -> int:
     """Insert missing candles using string->NUMBER casts, never float binds."""
     if frame.empty:
         return 0

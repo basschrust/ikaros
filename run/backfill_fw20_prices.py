@@ -12,6 +12,7 @@ import re
 import time
 from datetime import date, timedelta
 from pathlib import Path
+from requests import Session
 
 from ingestion.fw20_history import CONTRACT, parse_history
 from run.refresh_fw20_prices import persist, registered
@@ -28,7 +29,7 @@ def history_url(symbol: str, page: int) -> str:
     return BASE + symbol + (f",{page}" if page > 1 else "")
 
 
-def fetch_page(session, symbol: str, page: int, *, timeout: int) -> str:
+def fetch_page(session: Session, symbol: str, page: int, *, timeout: int) -> str:
     url = history_url(symbol, page)
     response = session.get(url, timeout=timeout)
     response.raise_for_status()
@@ -53,7 +54,7 @@ def advertised_pages(html: str, symbol: str) -> set[int]:
 
 
 def gather_history(
-    session,
+    session: Session,
     symbol: str,
     *,
     through: date,

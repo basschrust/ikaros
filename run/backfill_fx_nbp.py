@@ -14,6 +14,8 @@ from contextlib import closing
 from datetime import date
 import logging
 import time
+from snowflake.connector import SnowflakeConnection
+from requests import Session
 
 from ingestion.nbp_fx import cross_rows, parse_table, windows
 
@@ -21,7 +23,7 @@ LOG = logging.getLogger("ikaros.fx.nbp")
 API = "https://api.nbp.pl/api/exchangerates/tables/a/{}/{}/"
 
 
-def registered_pairs(connection) -> dict[str, int]:
+def registered_pairs(connection: SnowflakeConnection) -> dict[str, int]:
     with closing(connection.cursor()) as cur:
         cur.execute(
             'SELECT "SYMBOL", "CURRENCY_PAIR_ID" FROM "CURRENCY_PAIRS" WHERE "IS_ACTIVE" = TRUE'
@@ -35,7 +37,7 @@ def registered_pairs(connection) -> dict[str, int]:
     return pairs
 
 
-def fetch_tables(session, start: date, end: date, *, timeout: int = 30):
+def fetch_tables(session: Session, start: date, end: date, *, timeout: int = 30):
     url = API.format(start.isoformat(), end.isoformat())
     response = session.get(
         url,
@@ -50,7 +52,7 @@ def fetch_tables(session, start: date, end: date, *, timeout: int = 30):
     return parse_table(payload)
 
 
-def persist(connection, rows, ids: dict[str, int]):
+def persist(connection: SnowflakeConnection, rows, ids: dict[str, int]):
     """Atomic insert-only MERGE per date-window, preserving all market-source rows."""
     if not rows:
         return 0
