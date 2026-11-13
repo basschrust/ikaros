@@ -10,6 +10,8 @@ from html import unescape
 from pathlib import Path
 import re
 from urllib.parse import unquote, urlsplit
+from collections.abc import Callable
+from requests import Session
 
 import pandas as pd
 
@@ -37,7 +39,7 @@ def advertised_pages(html: str, symbol: str) -> set[int]:
     return pages
 
 
-def parse_page(html: str, symbol: str, start: date, end: date) -> list[dict]:
+def parse_page(html: str, symbol: str) -> list[dict]:
     # Reject HTML response with a different instrument, e.g. site redirect/error.
     if not re.search(r"(?<![A-Z0-9])" + re.escape(symbol) + r"(?![A-Z0-9])", html, re.I):
         raise ValueError(f"Page does not identify expected contract {symbol}")
@@ -71,7 +73,7 @@ def parse_page(html: str, symbol: str, start: date, end: date) -> list[dict]:
 
 
 def collect(
-    session,
+    session: Session,
     symbol: str,
     start: date,
     end: date,
@@ -80,7 +82,7 @@ def collect(
     timeout: int = 25,
     max_pages: int = 100,
     html_dir: Path | None = None,
-    sleep=None,
+    sleep: Callable[[float], None] | None = None,
 ) -> tuple[list[dict], str, int]:
     """Fetch pages until historical window covered; fail closed on ambiguous pagination."""
     if start > end or max_pages < 1:
@@ -105,7 +107,7 @@ def collect(
             html = path.read_text(encoding="utf-8")
         if not html.strip():
             raise RuntimeError(f"Empty historical page: {symbol} page={page}")
-        rows = parse_page(html, symbol, start, end)
+        rows = parse_page(html, symbol)
         pages = advertised_pages(html, symbol)
         if not rows:
             if page == 1:
