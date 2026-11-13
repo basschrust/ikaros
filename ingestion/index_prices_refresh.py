@@ -6,6 +6,7 @@ from contextlib import closing
 from datetime import date
 import math
 import pandas as pd
+from snowflake.connector import SnowflakeConnection
 
 SOURCE = "yfinance|WIG20.WA"
 
@@ -46,7 +47,9 @@ def normalize_yahoo_index_prices(raw: pd.DataFrame, *, start: date, end: date) -
     return data.sort_values("date").reset_index(drop=True)
 
 
-def upsert_index_prices(connection, frame: pd.DataFrame, *, source: str = SOURCE) -> None:
+def upsert_index_prices(
+    connection: SnowflakeConnection, frame: pd.DataFrame, *, source: str = SOURCE
+) -> None:
     """Upsert INDEX_PRICES; keep previously imported non-Yahoo EoD values.
 
     The table is assumed to be the index-price table already installed in Ikaros,

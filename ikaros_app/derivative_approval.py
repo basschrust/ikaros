@@ -15,6 +15,7 @@ import csv
 from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import urlparse
+from snowflake.connector import SnowflakeConnection
 
 REQUIRED = (
     "symbol",
@@ -96,7 +97,7 @@ def parse_approved(path: Path) -> list[dict]:
     return approved
 
 
-def promote(connection, contracts: list[dict], *, write: bool) -> None:
+def promote(connection: SnowflakeConnection, contracts: list[dict], *, write: bool) -> None:
     """Preflight *all* candidates before writing any one contract.
 
     A failed existing-contract comparison should not leave partially registered

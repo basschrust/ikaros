@@ -1,7 +1,6 @@
-"""Load US Treasury par, ECB AAA spot and NY Fed overnight reference rates into the Ikaros schema.
+"""Official rate histories including Swiss Confederation fitted spot yields.
 
-No new repository or external dependencies. Dry-run by default; --write merges
-by (series_id, observation date). Source values are normalized percent->decimal.
+Dry-run by default; --write persists to existing Ikaros RATE tables.
 """
 
 from __future__ import annotations
@@ -21,6 +20,36 @@ from ikaros_app.rates import (
     NYFedOvernightProvider,
     selected_sources,
 )
+from ikaros_app.rates_international import (
+    BoERatesProvider,
+    ECBESTRProvider,
+    SNBPolicyProvider,
+    configured_series as international_series,
+)
+
+from ikaros_app.rates_central_europe import (
+    NBPPolicyProvider,
+    CNBPolicyProvider,
+    MNBPolicyProvider,
+    configured_series as central_europe_series,
+)
+
+from ikaros_app.rates_government import (
+    BoEGiltYieldProvider,
+    EurostatGovYieldProvider,
+    configured_series as government_series,
+)
+
+from ikaros_app.rates_swiss_government import (
+    SNBGovernmentYieldProvider,
+    configured_series as swiss_government_series,
+)
+
+from ikaros_app.rates_us_extended import (
+    TreasuryRealYieldProvider,
+    TreasuryBillYieldProvider,
+    configured_series as extended_us_series,
+)
 
 LOG = logging.getLogger(__name__)
 
@@ -33,21 +62,24 @@ SCHEMA_DDL = (
        "CREATED_AT" TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP())""",
     """CREATE TABLE IF NOT EXISTS "RATE_OBSERVATIONS" (
        "SERIES_ID" VARCHAR, "DATE" DATE, "RATE" FLOAT,
-       "SOURCE" VARCHAR,
+       "SOURCE" VARCHAR, "BID" FLOAT, "ASK" FLOAT,
        "INGESTED_AT" TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP())""",
 )
 
 
 def persist(connection, series, observations) -> int:
-    """Idempotent batch insertion; refuse reference conflicts or foreign-source overwrite."""
+    """Idempotent batch insertion; refuse conflicting references or source overwrite."""
     if not observations:
         return 0
     with connection.cursor() as cur:
-        # DDL outside the transaction, as Snowflake DDL auto-commits.
         for ddl in SCHEMA_DDL:
             cur.execute(ddl)
+        # Existing Snowflake tables require explicit additive schema evolution.
+        cur.execute('ALTER TABLE "RATE_OBSERVATIONS" ADD COLUMN IF NOT EXISTS "BID" FLOAT')
+        cur.execute('ALTER TABLE "RATE_OBSERVATIONS" ADD COLUMN IF NOT EXISTS "ASK" FLOAT')
         cur.execute("""CREATE TEMP TABLE IF NOT EXISTS "IKAROS_RATE_STAGE" (
-            "SERIES_ID" VARCHAR, "DATE" DATE, "RATE" FLOAT, "SOURCE" VARCHAR)""")
+            "SERIES_ID" VARCHAR, "DATE" DATE, "RATE" FLOAT, "SOURCE" VARCHAR,
+            "BID" FLOAT, "ASK" FLOAT)""")
         try:
             cur.execute("BEGIN")
             for spec in series.values():
@@ -80,10 +112,17 @@ def persist(connection, series, observations) -> int:
             cur.execute('DELETE FROM "IKAROS_RATE_STAGE"')
             cur.executemany(
                 """INSERT INTO "IKAROS_RATE_STAGE"
-                ("SERIES_ID","DATE","RATE","SOURCE")
-                VALUES (%s,TO_DATE(%s),%s,%s)""",
+                ("SERIES_ID","DATE","RATE","SOURCE","BID","ASK")
+                VALUES (%s,TO_DATE(%s),%s,%s,%s,%s)""",
                 [
-                    (r.series_id, r.day.isoformat(), r.rate, series[r.series_id].source)
+                    (
+                        r.series_id,
+                        r.day.isoformat(),
+                        r.rate,
+                        series[r.series_id].source,
+                        getattr(r, "bid", None),
+                        getattr(r, "ask", None),
+                    )
                     for r in observations
                 ],
             )
@@ -96,14 +135,49 @@ def persist(connection, series, observations) -> int:
             cur.execute("""MERGE INTO "RATE_OBSERVATIONS" t USING "IKAROS_RATE_STAGE" s
                 ON t."SERIES_ID"=s."SERIES_ID" AND t."DATE"=s."DATE"
                 WHEN MATCHED THEN UPDATE SET t."RATE"=s."RATE",
+                    t."BID"=s."BID", t."ASK"=s."ASK",
                     t."INGESTED_AT"=CURRENT_TIMESTAMP()
-                WHEN NOT MATCHED THEN INSERT ("SERIES_ID","DATE","RATE","SOURCE")
-                    VALUES (s."SERIES_ID",s."DATE",s."RATE",s."SOURCE")""")
+                WHEN NOT MATCHED THEN INSERT ("SERIES_ID","DATE","RATE","SOURCE","BID","ASK")
+                    VALUES (s."SERIES_ID",s."DATE",s."RATE",s."SOURCE",s."BID",s."ASK")""")
             cur.execute("COMMIT")
         except Exception:
             cur.execute("ROLLBACK")
             raise
     return len(observations)
+
+
+def select_series(series_ids: list[str] | None):
+    """Combine both catalogs while keeping the legacy rates module unchanged."""
+    existing, _ = selected_sources(None)
+    extended = international_series()
+    overlap = set(existing) & set(extended)
+    if overlap:
+        raise ValueError(f"Duplicate configured rate IDs: {sorted(overlap)}")
+    central = central_europe_series()
+    overlap = (set(existing) | set(extended)) & set(central)
+    if overlap:
+        raise ValueError(f"Duplicate configured rate IDs: {sorted(overlap)}")
+    government = government_series()
+    overlap = (set(existing) | set(extended) | set(central)) & set(government)
+    if overlap:
+        raise ValueError(f"Duplicate configured government yield series IDs: {sorted(overlap)}")
+    swiss = swiss_government_series()
+    overlap = (set(existing) | set(extended) | set(central) | set(government)) & set(swiss)
+    if overlap:
+        raise ValueError(f"Duplicate Swiss government series IDs: {sorted(overlap)}")
+    us_extended = extended_us_series()
+    overlap = (set(existing) | set(extended) | set(central) | set(government) | set(swiss)) & set(
+        us_extended
+    )
+    if overlap:
+        raise ValueError(f"Duplicate extended US series IDs: {sorted(overlap)}")
+    catalog = {**existing, **extended, **central, **government, **swiss, **us_extended}
+    wanted = set(series_ids) if series_ids is not None else set(catalog)
+    unknown = wanted - set(catalog)
+    if unknown:
+        raise ValueError(f"Unknown rate series: {', '.join(sorted(unknown))}")
+    selected = {s: catalog[s] for s in sorted(wanted)}
+    return selected, {r.source for r in selected.values()}
 
 
 def main() -> None:
@@ -115,12 +189,27 @@ def main() -> None:
     args = p.parse_args()
     if args.start > args.end:
         p.error("--start must not follow --end")
-    selected, sources = selected_sources(args.series)
+    selected, sources = select_series(args.series)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     all_observations = []
     with requests.Session() as session:
         session.headers.update({"User-Agent": "IkarosMarketData/1.0"})
-        for provider in (TreasuryYieldProvider(), ECBSpotYieldProvider(), NYFedOvernightProvider()):
+        for provider in (
+            TreasuryYieldProvider(),
+            ECBSpotYieldProvider(),
+            NYFedOvernightProvider(),
+            BoERatesProvider(),
+            ECBESTRProvider(),
+            SNBPolicyProvider(),
+            NBPPolicyProvider(),
+            CNBPolicyProvider(),
+            MNBPolicyProvider(),
+            BoEGiltYieldProvider(),
+            EurostatGovYieldProvider(),
+            SNBGovernmentYieldProvider(),
+            TreasuryRealYieldProvider(),
+            TreasuryBillYieldProvider(),
+        ):
             if provider.source not in sources:
                 continue
             values = provider.history(session, args.start, args.end)

@@ -10,6 +10,7 @@ from datetime import date
 from io import StringIO
 import math
 import pandas as pd
+from snowflake.connector import SnowflakeConnection
 
 SOURCE = "stooq|wig20|daily"
 COLUMNS = ["date", "open", "high", "low", "close"]
@@ -85,7 +86,7 @@ def check_overlaps(conn, frame: pd.DataFrame, *, tolerance: float = 0.5) -> tupl
     return len(existing), mismatches
 
 
-def insert_missing(conn, frame: pd.DataFrame, *, batch_size: int = 500) -> int:
+def insert_missing(conn: SnowflakeConnection, frame: pd.DataFrame, *, batch_size: int = 500) -> int:
     """Stage and merge only previously missing WIG20 dates, without changing other sources."""
     if frame.empty:
         return 0

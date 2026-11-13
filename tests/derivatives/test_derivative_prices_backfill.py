@@ -16,7 +16,7 @@ HTML = """<html><h1>Notowania historyczne OW20L264000</h1>
 
 
 def test_parse_options_with_sparse_trade_days():
-    rows = parse_page(HTML, "OW20L264000", date(2026, 7, 1), date(2026, 9, 30))
+    rows = parse_page(HTML, "OW20L264000")
     assert len(rows) == 3
     assert rows[0]["settlement"] is None
     assert rows[0]["source"] == "biznesradar|html_history"
@@ -33,7 +33,7 @@ def test_collect_quarter_no_synthetic_dates():
 
 def test_wrong_symbol_fails_closed():
     with pytest.raises(ValueError, match="does not identify"):
-        parse_page(HTML, "FW20Z2620", date(2026, 7, 1), date(2026, 9, 30))
+        parse_page(HTML, "FW20Z2620")
 
 
 def test_url_and_pagination():
