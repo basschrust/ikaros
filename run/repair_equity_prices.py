@@ -1,13 +1,6 @@
-"""Repair explicitly selected zero-volume equity candles without touching good rows.
+"""Repair explicitly selected zero-volume GPW candles, using fixed-point SQL binds.
 
-Read-only preview by default. Replacements are from fresh OpenBB/Yahoo daily
-history, or an independently verified local CSV (--csv). No prices are invented.
-
-Example:
-  uv run --extra snowflake python -m run.repair_equity_prices \
-    --symbol PZU.WA --start 2026-10-26 --end 2026-11-11
-  uv run --extra snowflake python -m run.repair_equity_prices \
-    --symbol PZU.WA --start 2026-10-26 --end 2026-11-11 --write
+Read-only by default. Does not replace valid stored sessions.
 """
 
 from __future__ import annotations
@@ -19,6 +12,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from ingestion.decimal_prices import decimal_text, integer_text
 from ingestion.equity_quality import suspect_zero_volume, validate_repair_candles
 
 SELECT = (
@@ -27,9 +21,10 @@ SELECT = (
     'ORDER BY TO_DATE("DATE")'
 )
 UPDATE = (
-    'UPDATE "PRICES" SET "OPEN"=%s, "HIGH"=%s, "LOW"=%s, '
-    '"CLOSE"=%s, "VOLUME"=%s '
-    'WHERE "SYMBOL"=%s AND TO_DATE("DATE")=%s AND "VOLUME"=0 '
+    'UPDATE "PRICES" SET "OPEN"=TO_DECIMAL(%s,24,8), '
+    '"HIGH"=TO_DECIMAL(%s,24,8), "LOW"=TO_DECIMAL(%s,24,8), '
+    '"CLOSE"=TO_DECIMAL(%s,24,8), "VOLUME"=TO_DECIMAL(%s,38,0) '
+    'WHERE "SYMBOL"=%s AND TO_DATE("DATE")=%s AND "VOLUME"=0'
 )
 
 
@@ -46,7 +41,6 @@ def load_current(connection, symbol: str, start: date, end: date) -> pd.DataFram
 
 
 def plan_repair(current: pd.DataFrame, replacement: pd.DataFrame, symbol: str) -> pd.DataFrame:
-    """Only replace stored zero-volume observations with verified active candles."""
     valid = validate_repair_candles(replacement, symbol)
     flagged = current.loc[suspect_zero_volume(current, symbol)].copy()
     if flagged.empty:
@@ -63,11 +57,6 @@ def plan_repair(current: pd.DataFrame, replacement: pd.DataFrame, symbol: str) -
 def plan_repair_partial(
     current: pd.DataFrame, replacement: pd.DataFrame, symbol: str
 ) -> tuple[pd.DataFrame, list[tuple[date, str]]]:
-    """Prepare only valid suspect dates; report missing/invalid sources individually.
-
-    Never repair stored normal-volume days. An ambiguous provider date or
-    wrong-symbol response fails the whole operation before any write.
-    """
     flagged = current.loc[suspect_zero_volume(current, symbol)].copy()
     if flagged.empty:
         return replacement.iloc[0:0].copy(), []
@@ -101,7 +90,6 @@ def plan_repair_partial(
 
 
 def apply_repair(connection, symbol: str, plan: pd.DataFrame) -> int:
-    """Transactional updates guarded by prior zero volume and unique rowcount."""
     if plan.empty:
         return 0
     with closing(connection.cursor()) as cur:
@@ -111,11 +99,11 @@ def apply_repair(connection, symbol: str, plan: pd.DataFrame) -> int:
                 cur.execute(
                     UPDATE,
                     (
-                        float(row.open),
-                        float(row.high),
-                        float(row.low),
-                        float(row.close),
-                        float(row.volume),
+                        decimal_text(row.open, allow_null=False),
+                        decimal_text(row.high, allow_null=False),
+                        decimal_text(row.low, allow_null=False),
+                        decimal_text(row.close, allow_null=False),
+                        integer_text(row.volume, allow_null=False),
                         symbol,
                         row.date.isoformat(),
                     ),
@@ -136,15 +124,13 @@ def main() -> None:
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--start", required=True, type=date.fromisoformat)
     parser.add_argument("--end", required=True, type=date.fromisoformat)
-    parser.add_argument(
-        "--csv", type=Path, help="Verified OHLCV CSV instead of current OpenBB feed"
-    )
+    parser.add_argument("--csv", type=Path, help="Verified OHLCV CSV instead of OpenBB feed")
     parser.add_argument("--write", action="store_true")
     args = parser.parse_args()
     if args.start > args.end:
         parser.error("start must not follow end")
     if not args.symbol.endswith(".WA"):
-        parser.error("This repair worker is restricted to GPW Yahoo .WA symbols")
+        parser.error("Repair worker is restricted to GPW Yahoo .WA symbols")
     from config.config import load_config
     from database.repositories.factory import repository_from_config
 
@@ -164,7 +150,7 @@ def main() -> None:
             print("Nothing to repair")
             return
         if args.csv:
-            raw = pd.read_csv(args.csv)
+            raw = pd.read_csv(args.csv, dtype=str)
             raw.columns = [str(col).strip().lower() for col in raw.columns]
             if "symbol" not in raw.columns:
                 raw["symbol"] = args.symbol
@@ -189,9 +175,7 @@ def main() -> None:
             return
         if planned.empty:
             raise RuntimeError(
-                "No usable replacement candles; nothing written. "
-                "The current Yahoo/OpenBB feed is still defective for these dates. "
-                "Supply independently verified --csv OHLCV observations."
+                "No usable replacement candles; nothing written. Supply verified --csv"
             )
         count = apply_repair(repo.connection, args.symbol, planned)
         verified = load_current(repo.connection, args.symbol, args.start, args.end)
@@ -199,8 +183,7 @@ def main() -> None:
         print(f"REPAIRED {count} rows for {args.symbol}; remaining suspect={len(remaining)}")
         if not remaining.empty:
             raise RuntimeError(
-                f"Partial repair completed; unresolved dates: {remaining['date'].tolist()}. "
-                "Supply independently verified --csv OHLCV for remaining dates."
+                f"Partial repair completed; unresolved: {remaining['date'].tolist()}"
             )
 
 

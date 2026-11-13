@@ -1,12 +1,8 @@
-"""Conservative quality rules for equity EOD prices.
-
-Zero-volume bars can be real for illiquid securities. Therefore we flag flat,
-zero-volume candles for any venue, and all zero-volume candles only for an
-explicit watchlist of liquid instruments. We never synthesize replacements.
-"""
+"""Conservative quality checks for equity daily prices and repairs."""
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 import pandas as pd
 
 LIQUID_VOLUME_REQUIRED = frozenset({"PZU.WA"})
@@ -14,7 +10,6 @@ OHLC = ("open", "high", "low", "close")
 
 
 def suspect_zero_volume(frame: pd.DataFrame, symbol: str) -> pd.Series:
-    """Return boolean row mask; missing volume is not automatically zero."""
     if frame.empty:
         return pd.Series(False, index=frame.index, dtype=bool)
     volume = pd.to_numeric(frame["volume"], errors="coerce")
@@ -28,8 +23,20 @@ def suspect_zero_volume(frame: pd.DataFrame, symbol: str) -> pd.Series:
     return (zero & flat).fillna(False)
 
 
+def _strict_decimal(value: object, column: str) -> Decimal:
+    if pd.isna(value):
+        raise ValueError(f"Nonfinite or absent {column}")
+    try:
+        value_decimal = Decimal(str(value))
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"Invalid {column}") from exc
+    if not value_decimal.is_finite():
+        raise ValueError(f"Nonfinite or absent {column}")
+    return value_decimal
+
+
 def validate_repair_candles(frame: pd.DataFrame, symbol: str) -> pd.DataFrame:
-    """Fail closed if any replacement candle is malformed, missing, or inactive."""
+    """Validate source OHLCV using Decimal without a numeric float round-trip."""
     required = {"symbol", "date", *OHLC, "volume"}
     missing = required - set(frame)
     if missing:
@@ -40,18 +47,15 @@ def validate_repair_candles(frame: pd.DataFrame, symbol: str) -> pd.DataFrame:
     result["date"] = pd.to_datetime(result["date"], errors="raise").dt.date
     if result["date"].duplicated().any():
         raise ValueError("Duplicate repair dates")
-    for col in (*OHLC, "volume"):
-        result[col] = pd.to_numeric(result[col], errors="raise")
-        if (
-            result[col].isna().any()
-            or not result[col].map(lambda x: pd.notna(x) and abs(x) != float("inf")).all()
+    for column in (*OHLC, "volume"):
+        result[column] = result[column].map(lambda item: _strict_decimal(item, column))
+    for row in result.itertuples(index=False):
+        if min(row.open, row.high, row.low, row.close, row.volume) <= 0:
+            raise ValueError("Replacement requires positive OHLC and volume")
+        if row.volume != row.volume.to_integral_value():
+            raise ValueError("Replacement volume must be integral")
+        if row.high < max(row.open, row.close, row.low) or row.low > min(
+            row.open, row.close, row.high
         ):
-            raise ValueError(f"Nonfinite or absent {col}")
-    if (result[list(OHLC)] <= 0).any().any() or result["volume"].le(0).any():
-        raise ValueError("Replacement requires positive OHLC and volume")
-    if (
-        (result["high"] < result[["open", "close", "low"]].max(axis=1))
-        | (result["low"] > result[["open", "close", "high"]].min(axis=1))
-    ).any():
-        raise ValueError("Inconsistent OHLC range")
+            raise ValueError("Inconsistent OHLC range")
     return result

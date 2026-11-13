@@ -1,6 +1,6 @@
 """Shared multi-venue daily equity backfill; registered symbols only, insert-only MERGE.
 
-Example: python -m run.backfill_equities --venue US --start 2025-01-01 --end 2026-11-09 --write
+Persist OHLCV through fixed-point decimals, not Python binary floats.
 """
 
 from __future__ import annotations
@@ -9,42 +9,32 @@ import argparse
 from contextlib import closing
 from datetime import date, timedelta
 import logging
-import math
 
 import pandas as pd
 
 from config.config import load_config
 from database.repositories.factory import repository_from_config
+from ingestion.decimal_prices import candle_params
 from ingestion.gpw_backfill import missing_observations, normalize_prices, year_windows
 from ingestion.prices import fetch_eod_prices
 from ingestion.iic import BatchKey, SnowflakeIIC, Status
 
 LOG = logging.getLogger(__name__)
-
-# Pilot listings explicitly verified as GBp-quoted on Yahoo Finance.
-# Never assume every LSE listing is pence-quoted: some trade in GBP or USD.
 LSE_PENCE_SYMBOLS = frozenset({"SHEL.L", "BP.L", "HSBA.L", "ULVR.L", "LSEG.L"})
+VENUES = ("GPW", "US", "PSE", "XETRA", "PARIS", "LSE", "BSE")
 
 
 def normalize_equity_quote_units(frame: pd.DataFrame, venue: str, symbol: str) -> pd.DataFrame:
-    """Convert verified LSE GBp OHLC to GBP without guessing dividend units.
-
-    Yahoo/OpenBB dividend records do not carry a verified event currency. Keep
-    zeros (which are unit-independent), set nonzero London dividends to NULL
-    and warn. This preserves the candles but NOT complete dividend history.
-    Revisit before using London prices for dividend/total-return calculations.
-    """
+    """Convert verified London GBp OHLC to GBP; never guess dividend currency."""
     if venue != "LSE" or frame.empty:
         return frame
     if symbol not in LSE_PENCE_SYMBOLS:
-        raise ValueError(
-            f"LSE quote units not verified for {symbol}; inspect Yahoo currency "
-            "and add an explicit conversion rule before ingestion"
-        )
+        raise ValueError(f"LSE quote units not verified for {symbol}")
     result = frame.copy()
+    # Keep prior normalizer semantics; fixed-point conversion occurs at SQL binding.
     for field in ("open", "high", "low", "close"):
         result[field] = pd.to_numeric(result[field], errors="coerce") / 100
-    if "dividend" in result.columns:
+    if "dividend" in result:
         dividend = pd.to_numeric(result["dividend"], errors="coerce")
         uncertain = dividend.notna() & dividend.ne(0)
         if uncertain.any():
@@ -56,9 +46,6 @@ def normalize_equity_quote_units(frame: pd.DataFrame, venue: str, symbol: str) -
             )
         result["dividend"] = dividend.mask(uncertain)
     return result
-
-
-VENUES = ("GPW", "US", "PSE", "XETRA", "PARIS", "LSE", "BSE")
 
 
 def registered_symbols(
@@ -94,13 +81,16 @@ def existing_dates(conn, symbol: str, start: date, end: date) -> set[date]:
 
 
 def persist_batch(conn, frame: pd.DataFrame) -> int:
-    """Insert missing observations using a temporary staging table and atomic MERGE."""
+    """Insert missing candles using string->NUMBER casts, never float binds."""
     if frame.empty:
         return 0
     insert_sql = (
         'INSERT INTO "IKAROS_PRICE_STAGE" ("SYMBOL", "DATE", "OPEN", "HIGH", "LOW", '
         '"CLOSE", "VOLUME", "DIVIDEND", "SPLIT_RATIO") '
-        "VALUES (%s, TO_TIMESTAMP_NTZ(%s, 'YYYY-MM-DD'), %s, %s, %s, %s, %s, %s, %s)"
+        "VALUES (%s, TO_TIMESTAMP_NTZ(%s, 'YYYY-MM-DD'), "
+        "TO_DECIMAL(%s,24,8), TO_DECIMAL(%s,24,8), TO_DECIMAL(%s,24,8), "
+        "TO_DECIMAL(%s,24,8), TO_DECIMAL(%s,38,0), TO_DECIMAL(%s,24,8), "
+        "TO_DECIMAL(%s,24,8))"
     )
     merge_sql = """MERGE INTO "PRICES" AS target USING "IKAROS_PRICE_STAGE" AS source
         ON target."SYMBOL" = source."SYMBOL" AND TO_DATE(target."DATE") = TO_DATE(source."DATE")
@@ -108,19 +98,10 @@ def persist_batch(conn, frame: pd.DataFrame) -> int:
         ("SYMBOL", "DATE", "OPEN", "HIGH", "LOW", "CLOSE", "VOLUME", "DIVIDEND", "SPLIT_RATIO")
         VALUES (source."SYMBOL", source."DATE", source."OPEN", source."HIGH", source."LOW",
                 source."CLOSE", source."VOLUME", source."DIVIDEND", source."SPLIT_RATIO")"""
-    rows = []
-    for rec in frame.itertuples(index=False):
-        values = []
-        for field in ("open", "high", "low", "close", "volume", "dividend", "split_ratio"):
-            value = getattr(rec, field)
-            if pd.isna(value):
-                values.append(None)
-            else:
-                number = float(value)
-                if not math.isfinite(number):
-                    raise ValueError(f"Nonfinite {field} for {rec.symbol} {rec.date}")
-                values.append(number)
-        rows.append((rec.symbol, rec.date.isoformat(), *values))
+    rows = [
+        (rec.symbol, rec.date.isoformat(), *candle_params(rec))
+        for rec in frame.itertuples(index=False)
+    ]
     with closing(conn.cursor()) as cur:
         cur.execute('CREATE TEMP TABLE IF NOT EXISTS "IKAROS_PRICE_STAGE" LIKE "PRICES"')
         try:
