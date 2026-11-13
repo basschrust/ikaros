@@ -12,6 +12,7 @@ import re
 from urllib.parse import unquote, urlsplit
 from collections.abc import Callable
 from requests import Session
+from snowflake.connector import SnowflakeConnection
 
 import pandas as pd
 
@@ -158,7 +159,9 @@ def collect(
     raise RuntimeError(f"Maximum page limit reached for {symbol}")
 
 
-def registered(connection, symbols: list[str] | None = None) -> list[tuple[str, str, date]]:
+def registered(
+    connection: SnowflakeConnection, symbols: list[str] | None = None
+) -> list[tuple[str, str, date]]:
     with connection.cursor() as cur:
         cur.execute(
             'SELECT "CONTRACT_ID", "INSTRUMENT_TYPE", "EXPIRY_DATE" '
@@ -177,7 +180,7 @@ def registered(connection, symbols: list[str] | None = None) -> list[tuple[str, 
     return all_rows
 
 
-def persist(connection, rows: list[dict]) -> int:
+def persist(connection: SnowflakeConnection, rows: list[dict]) -> int:
     """Batch upsert in one transaction, refusing cross-source overwrites."""
     if not rows:
         return 0

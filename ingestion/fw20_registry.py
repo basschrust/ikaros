@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from datetime import date, timedelta
+from snowflake.connector import SnowflakeConnection
 
 FW20_RE = re.compile(r"^FW20(?P<month>[HMUZ])(?P<year>\d{2})20$")
 MONTHS = {"H": 3, "M": 6, "U": 9, "Z": 12}
@@ -68,7 +69,7 @@ UPDATE_STATUS = """UPDATE "DERIVATIVE_CANDIDATES" SET "REVIEW_STATUS" = 'REGISTE
 WHERE "SYMBOL" = %s AND "SOURCE" = 'bankier' AND "INSTRUMENT_TYPE" = 'FUTURE' """
 
 
-def matching(existing, spec: dict) -> bool:
+def matching(existing: dict, spec: dict) -> bool:
     expected = (
         spec["symbol"],
         spec["instrument_type"],
@@ -88,7 +89,9 @@ def matching(existing, spec: dict) -> bool:
     )
 
 
-def register(connection, *, as_of: date, write: bool = False) -> list[tuple[str, str]]:
+def register(
+    connection: SnowflakeConnection, *, as_of: date, write: bool = False
+) -> list[tuple[str, str]]:
     """Promote eligible WIG20 series using a single transaction per series.
 
     Existing matching contracts are left untouched. Conflicts and unverified

@@ -12,6 +12,7 @@ from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 from typing import Protocol
 import uuid
+from snowflake.connector import SnowflakeConnection
 
 
 class Status(str, Enum):
@@ -114,7 +115,7 @@ class SnowflakeIIC:
     because the price MERGE is idempotent.
     """
 
-    def __init__(self, connection):
+    def __init__(self, connection: SnowflakeConnection):
         self.connection = connection
 
     def prepare(self) -> None:

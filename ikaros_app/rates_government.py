@@ -12,6 +12,7 @@ import csv
 from datetime import date, datetime
 from io import StringIO
 from math import prod
+from requests import Session
 
 from ikaros_app.rates import RateObservation, RateSeries, _unique, percent_to_decimal
 
@@ -141,7 +142,7 @@ def parse_eurostat_json(payload: dict, geo: str, start: date, end: date) -> list
 class BoEGiltYieldProvider:
     source = "BOE_GILT"
 
-    def history(self, session, start: date, end: date) -> list[RateObservation]:
+    def history(self, session: Session, start: date, end: date) -> list[RateObservation]:
         response = session.get(
             BOE_URL,
             params={
@@ -163,7 +164,7 @@ class BoEGiltYieldProvider:
 class EurostatGovYieldProvider:
     source = "EUROSTAT_GOV"
 
-    def history(self, session, start: date, end: date) -> list[RateObservation]:
+    def history(self, session: Session, start: date, end: date) -> list[RateObservation]:
         result = []
         # A separate country request makes mixed-country responses detectable.
         for geo in EUROSTAT_GEO:

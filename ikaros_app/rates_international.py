@@ -14,6 +14,7 @@ import re
 import time
 
 import requests
+from requests import Session
 
 from ikaros_app.rates import RateObservation, RateSeries, _unique, percent_to_decimal
 
@@ -177,7 +178,7 @@ def parse_snb_csv(content: str, start: date, end: date) -> list[RateObservation]
 class BoERatesProvider:
     source = "BOE"
 
-    def history(self, session, start: date, end: date) -> list[RateObservation]:
+    def history(self, session: Session, start: date, end: date) -> list[RateObservation]:
         response = session.get(
             BOE_URL,
             params={
@@ -239,7 +240,7 @@ class ECBESTRProvider:
         assert last_error is not None
         raise last_error
 
-    def history(self, session, start: date, end: date) -> list[RateObservation]:
+    def history(self, session: Session, start: date, end: date) -> list[RateObservation]:
         if end < start:
             raise ValueError("ECB €STR end must not precede start")
         try:
@@ -270,7 +271,7 @@ class ECBESTRProvider:
 class SNBPolicyProvider:
     source = "SNB"
 
-    def history(self, session, start: date, end: date) -> list[RateObservation]:
+    def history(self, session: Session, start: date, end: date) -> list[RateObservation]:
         response = session.get(
             SNB_URL,
             params={

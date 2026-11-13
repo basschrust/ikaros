@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 import sys
 from zoneinfo import ZoneInfo
+from snowflake.connector import SnowflakeConnection
 
 YAHOO_FX = frozenset(
     "AUDPLN=X AUDUSD=X CHFPLN=X DKKPLN=X EURAUD=X EURCAD=X EURCHF=X "
@@ -77,7 +78,7 @@ def yesterday_warsaw() -> date:
     return datetime.now(ZoneInfo("Europe/Warsaw")).date() - timedelta(days=1)
 
 
-def as_date(value) -> date | None:
+def as_date(value: datetime | date | None) -> date | None:
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -87,7 +88,7 @@ def as_date(value) -> date | None:
     return date.fromisoformat(str(value)[:10])
 
 
-def fetch_inventory(connection, dataset: str) -> list[Instrument]:
+def fetch_inventory(connection: SnowflakeConnection, dataset: str) -> list[Instrument]:
     """Retain registered instruments without any observations."""
     if dataset in {"GPW", "US", "PSE", "XETRA", "PARIS", "LSE", "BSE"}:
         sql = '''SELECT s."SYMBOL", MAX(TO_DATE(p."DATE"))
