@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+from confluent_kafka import Consumer, Message
+from snowflake.connector import SnowflakeConnection
 
 from ingestion.kafka_inbound import Observation, TOPICS
 from ingestion.kafka_snowflake_sink import upsert_observation
@@ -12,7 +14,9 @@ from ingestion.kafka_snowflake_sink import upsert_observation
 LOG = logging.getLogger(__name__)
 
 
-def persist_and_commit(consumer, connection, message, *, dataset: str):
+def persist_and_commit(
+    consumer: Consumer, connection: SnowflakeConnection, message: Message, *, dataset: str
+):
     event = Observation.deserialize(message.value())
     if event.dataset != dataset:
         raise ValueError("Message dataset does not match topic")

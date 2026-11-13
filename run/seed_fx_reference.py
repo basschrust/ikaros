@@ -13,6 +13,9 @@ import logging
 from contextlib import closing
 from typing import Any
 
+from snowflake.connector import SnowflakeConnection
+from snowflake.connector.cursor import SnowflakeCursor
+
 from config.config import load_config
 from database.repositories.factory import repository_from_config
 
@@ -46,7 +49,12 @@ def select_reference(
     return [c for c in currencies if c["code"] in required_codes], selected
 
 
-def _fetch_reference(cur):
+def _fetch_reference(
+    cur: SnowflakeCursor,
+) -> tuple[
+    dict[str, int],
+    dict[str, tuple[int, int, int]],
+]:
     cur.execute('SELECT "CURRENCY_ID", "CODE" FROM "CURRENCIES"')
     rows = cur.fetchall()
     ids: dict[str, int] = {}
@@ -71,7 +79,7 @@ def _fetch_reference(cur):
 
 
 def seed(
-    connection, currencies: list[dict], pairs: list[dict], write: bool = False
+    connection: SnowflakeConnection, currencies: list[dict], pairs: list[dict], write: bool = False
 ) -> tuple[int, int]:
     """Seed missing reference rows in one DML transaction. Returns counts of new rows."""
     with closing(connection.cursor()) as cur:

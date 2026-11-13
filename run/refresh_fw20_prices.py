@@ -13,13 +13,15 @@ from pathlib import Path
 import logging
 import time
 
+from snowflake.connector import SnowflakeConnection
+
 from ingestion.fw20_history import CONTRACT, parse_history
 
 LOG = logging.getLogger(__name__)
 URL = "https://www.biznesradar.pl/notowania-historyczne/{}"
 
 
-def registered(connection) -> list[str]:
+def registered(connection: SnowflakeConnection) -> list[str]:
     with closing(connection.cursor()) as cur:
         cur.execute(
             'SELECT DISTINCT "CONTRACT_ID" FROM "DERIVATIVE_CONTRACTS" '
@@ -44,7 +46,7 @@ def retrieve(symbol: str, *, html_dir: Path | None, timeout: int) -> str:
     return response.text
 
 
-def persist(connection, rows: list[dict]) -> None:
+def persist(connection: SnowflakeConnection, rows: list[dict]) -> None:
     # Only overwrite rows already sourced from this same HTML series; do not
     # replace manual or independently sourced futures data.
     sql = """MERGE INTO "DERIVATIVE_PRICES" t USING (

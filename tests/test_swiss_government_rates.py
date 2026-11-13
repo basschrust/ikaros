@@ -51,7 +51,7 @@ def test_provider_requests_official_cube():
             pass
 
     class Session:
-        def get(self, url, **kwargs):
+        def get(self, url: str, **kwargs):
             assert url.endswith("/rendoblim/data/csv/en")
             assert kwargs["params"]["dimSel"].startswith("D0(")
             return Response()

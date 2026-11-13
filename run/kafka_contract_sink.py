@@ -7,6 +7,8 @@ from datetime import date
 import logging
 import os
 
+from snowflake.connector import SnowflakeConnection
+
 from ingestion.contract_discovery import Candidate
 from ingestion.fw20_registry import register
 
@@ -28,7 +30,7 @@ WHEN NOT MATCHED THEN INSERT ("SYMBOL", "SOURCE", "INSTRUMENT_TYPE", "EXPIRY_DAT
 VALUES (s."SYMBOL", s."SOURCE", s."INSTRUMENT_TYPE", s."EXPIRY_DATE", s."SOURCE_AS_OF")"""
 
 
-def ingest_message(connection, candidate: Candidate) -> None:
+def ingest_message(connection: SnowflakeConnection, candidate: Candidate) -> None:
     with connection.cursor() as cur:
         cur.execute(
             MERGE,

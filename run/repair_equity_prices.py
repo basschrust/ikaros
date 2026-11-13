@@ -11,6 +11,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
+from snowflake.connector import SnowflakeConnection
 
 from ingestion.decimal_prices import decimal_text, integer_text
 from ingestion.equity_quality import suspect_zero_volume, validate_repair_candles
@@ -28,7 +29,9 @@ UPDATE = (
 )
 
 
-def load_current(connection, symbol: str, start: date, end: date) -> pd.DataFrame:
+def load_current(
+    connection: SnowflakeConnection, symbol: str, start: date, end: date
+) -> pd.DataFrame:
     with closing(connection.cursor()) as cur:
         cur.execute(SELECT, (symbol, start.isoformat(), end.isoformat()))
         rows = cur.fetchall()
@@ -89,7 +92,7 @@ def plan_repair_partial(
     return result, problems
 
 
-def apply_repair(connection, symbol: str, plan: pd.DataFrame) -> int:
+def apply_repair(connection: SnowflakeConnection, symbol: str, plan: pd.DataFrame) -> int:
     if plan.empty:
         return 0
     with closing(connection.cursor()) as cur:

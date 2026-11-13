@@ -12,6 +12,8 @@ from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from snowflake.connector import SnowflakeConnection
+
 TABLE = '"INDEX_CONSTITUENTS"'
 
 
@@ -49,7 +51,7 @@ def load_snapshot(path: Path) -> tuple[date, str, list[dict]]:
     return dates.pop(), "WIG20", parsed
 
 
-def resolve_securities(conn, rows: list[dict]) -> list[dict]:
+def resolve_securities(conn: SnowflakeConnection, rows: list[dict]) -> list[dict]:
     """Match vendor short symbols to exactly one GPW security; store canonical SYMBOL."""
     with conn.cursor() as cur:
         cur.execute('SELECT "SYMBOL" FROM "SECURITIES" WHERE "VENUE" = %s', ("GPW",))
@@ -79,7 +81,7 @@ def source_label(rows: list[dict]) -> str:
     return f"{name} | {url}"
 
 
-def persist(conn, as_of: date, index: str, rows: list[dict]) -> None:
+def persist(conn: SnowflakeConnection, as_of: date, index: str, rows: list[dict]) -> None:
     """Replace one snapshot and adjust adjacent validity intervals transactionally.
 
     Future snapshots remain untouched. Historical intervals use inclusive bounds;

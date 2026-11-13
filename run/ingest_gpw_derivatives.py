@@ -11,6 +11,7 @@ import logging
 from pathlib import Path
 
 import pandas as pd
+from snowflake.connector import SnowflakeConnection
 
 from config.config import load_config
 from database.repositories.factory import repository_from_config
@@ -33,7 +34,7 @@ DDL = (
 
 
 def check_references(
-    connection,
+    connection: SnowflakeConnection,
     contracts: pd.DataFrame,
     *,
     write: bool,
@@ -79,7 +80,7 @@ def check_references(
             log.info("REGISTERED CONTRACT %s", contract_id)
 
 
-def persist_prices(connection, frame: pd.DataFrame) -> None:
+def persist_prices(connection: SnowflakeConnection, frame: pd.DataFrame) -> None:
     """Stage + MERGE. Existing prices are refreshed on later source revisions."""
     if frame.empty:
         return

@@ -156,17 +156,17 @@ class _TableParser(HTMLParser):
         self.row = []
         self.rows = []
 
-    def handle_starttag(self, tag, attrs):
+    def handle_starttag(self, tag: str, attrs: list):
         if tag == "tr":
             self.in_row, self.row = True, []
         elif tag in ("td", "th") and self.in_row:
             self.in_cell, self.cell = True, []
 
-    def handle_data(self, data):
+    def handle_data(self, data: str):
         if self.in_cell:
             self.cell.append(data)
 
-    def handle_endtag(self, tag):
+    def handle_endtag(self, tag: str):
         if tag in ("td", "th") and self.in_cell:
             self.row.append(" ".join(" ".join(self.cell).split()))
             self.in_cell = False
@@ -185,11 +185,13 @@ def parse_mnb_html(content: str, start: date, end: date) -> list[RateObservation
             continue
         raw_date = cells[0].strip()
         raw_rate = cells[1].strip()
-        if not re.fullmatch(r"\d{1,2} [A-Za-z]+ \d{4}", raw_date):
+        if not re.fullmatch(pattern=r"\d{1,2} [A-Za-z]+ \d{4}", string=raw_date):
             continue
-        if not re.fullmatch(r"-?\d+[.,]\d+\s*%", raw_rate):
+        if not re.fullmatch(pattern=r"-?\d+[.,]\d+\s*%", string=raw_rate):
             raise ValueError(f"Invalid MNB policy rate: {raw_date} {raw_rate!r}")
-        events.append((datetime.strptime(raw_date, "%d %B %Y").date(), _rate(raw_rate, "MNB")))
+        events.append(
+            (datetime.strptime(raw_date, "%d %B %Y").date(), _rate(value=raw_rate, label="MNB"))
+        )
     return _effective_daily(events, "MNB_BASE_HUF", start, end)
 
 
