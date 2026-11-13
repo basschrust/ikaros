@@ -12,6 +12,7 @@ from datetime import date, timedelta
 from typing import Iterator
 
 import pandas as pd
+from snowflake.connector import SnowflakeConnection
 
 from config.config import load_config
 from database.repositories.factory import repository_from_config
@@ -101,7 +102,7 @@ def normalize_batch(
     return rows
 
 
-def existing_pair_id(connection, symbol: str) -> int:
+def existing_pair_id(connection: SnowflakeConnection, symbol: str) -> int:
     with connection.cursor() as cur:
         cur.execute(
             'SELECT "CURRENCY_PAIR_ID" FROM "CURRENCY_PAIRS" '
@@ -117,7 +118,9 @@ def existing_pair_id(connection, symbol: str) -> int:
     return int(rows[0][0])
 
 
-def persisted_dates(connection, pair_id: int, begin: date, end: date) -> set[str]:
+def persisted_dates(
+    connection: SnowflakeConnection, pair_id: int, begin: date, end: date
+) -> set[str]:
     with connection.cursor() as cur:
         cur.execute(
             'SELECT TO_CHAR("DATE", \'YYYY-MM-DD\') FROM "FX_RATES" '
@@ -129,7 +132,7 @@ def persisted_dates(connection, pair_id: int, begin: date, end: date) -> set[str
         return {str(row[0]) for row in cur.fetchall()}
 
 
-def merge_batch(connection, rows: list[tuple]) -> int:
+def merge_batch(connection: SnowflakeConnection, rows: list[tuple]) -> int:
     """Stage one batch and MERGE atomically. Return inserted row count."""
     if not rows:
         return 0

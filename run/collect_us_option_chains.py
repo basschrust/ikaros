@@ -19,6 +19,7 @@ import re
 import time
 
 import pandas as pd
+from snowflake.connector import SnowflakeConnection
 
 LOG = logging.getLogger(__name__)
 OCC = re.compile(r"^([A-Z]{1,6})(\d{6})([CP])(\d{8})$")
@@ -75,7 +76,7 @@ MERGE = """MERGE INTO "US_OPTION_CHAIN_SNAPSHOTS" t
     )"""
 
 
-def optional_number(value, field: str) -> float | None:
+def optional_number(value: object, field: str) -> float | None:
     if value is None or pd.isna(value):
         return None
     number = float(value)
@@ -84,7 +85,7 @@ def optional_number(value, field: str) -> float | None:
     return number
 
 
-def naive_utc(value) -> datetime | None:
+def naive_utc(value: object) -> datetime | None:
     if value is None or pd.isna(value):
         return None
     timestamp = pd.Timestamp(value)
@@ -177,7 +178,7 @@ def fetch_chains(
     return out
 
 
-def registered_underlyings(connection, symbols: list[str]) -> None:
+def registered_underlyings(connection: SnowflakeConnection, symbols: list[str]) -> None:
     with closing(connection.cursor()) as cur:
         cur.execute(
             'SELECT "SYMBOL", "CURRENCY" FROM "SECURITIES" WHERE "VENUE"=%s '
@@ -193,7 +194,7 @@ def registered_underlyings(connection, symbols: list[str]) -> None:
         raise ValueError("US option underlyings must be registered in USD")
 
 
-def persist(connection, rows: list[dict]) -> None:
+def persist(connection: SnowflakeConnection, rows: list[dict]) -> None:
     if not rows:
         return
     if len({(r["contract_symbol"], r["quote_date"]) for r in rows}) != len(rows):

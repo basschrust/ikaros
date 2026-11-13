@@ -10,6 +10,8 @@ from datetime import date
 import logging
 
 import requests
+from snowflake.connector import SnowflakeConnection
+from ikaros_app.rates import RateSeries, RateObservation
 
 from config.config import load_config
 from database.repositories.factory import repository_from_config
@@ -67,7 +69,11 @@ SCHEMA_DDL = (
 )
 
 
-def persist(connection, series, observations) -> int:
+def persist(
+    connection: SnowflakeConnection,
+    series: dict[str, RateSeries],
+    observations: list[RateObservation],
+) -> int:
     """Idempotent batch insertion; refuse conflicting references or source overwrite."""
     if not observations:
         return 0
@@ -146,7 +152,9 @@ def persist(connection, series, observations) -> int:
     return len(observations)
 
 
-def select_series(series_ids: list[str] | None):
+def select_series(
+    series_ids: list[str] | None,
+) -> tuple[dict[str, RateSeries], set[str]]:
     """Combine both catalogs while keeping the legacy rates module unchanged."""
     existing, _ = selected_sources(None)
     extended = international_series()
