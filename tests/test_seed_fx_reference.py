@@ -3,7 +3,7 @@ from run.seed_fx_reference import select_reference
 
 
 @pytest.fixture
-def cfg():
+def cfg() -> dict[str, list]:
     return {
         "currencies": [
             {"code": "EUR", "name": "Euro"},
@@ -18,22 +18,22 @@ def cfg():
     }
 
 
-def test_select_multiple_pairs(cfg):
-    currencies, pairs = select_reference(cfg, ["USDPLN=X", "EURUSD=X"])
+def test_select_multiple_pairs(cfg: dict[str, list]) -> None:
+    currencies, pairs = select_reference(config=cfg, symbols=["USDPLN=X", "EURUSD=X"])
     assert {c["code"] for c in currencies} == {"USD", "EUR", "PLN"}
     assert [p["symbol"] for p in pairs] == ["USDPLN=X", "EURUSD=X"]
 
 
-def test_selection_deduplicated(cfg):
-    _, pairs = select_reference(cfg, ["USDPLN=X", "USDPLN=X"])
+def test_selection_deduplicated(cfg: dict[str, list]) -> None:
+    _, pairs = select_reference(config=cfg, symbols=["USDPLN=X", "USDPLN=X"])
     assert len(pairs) == 1
 
 
-def test_missing_symbol_rejected(cfg):
+def test_missing_symbol_rejected(cfg: dict[str, list]):
     with pytest.raises(ValueError, match="Unknown symbols"):
-        select_reference(cfg, ["ABC=X"])
+        select_reference(config=cfg, symbols=["ABC=X"])
 
 
-def test_all_pairs(cfg):
-    _, pairs = select_reference(cfg, None)
+def test_all_pairs(cfg: dict[str, list]):
+    _, pairs = select_reference(config=cfg, symbols=None)
     assert len(pairs) == 3

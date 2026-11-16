@@ -13,7 +13,7 @@ def _page_html(symbol, latest, count):
     return f"{symbol} " + " ".join(dates)
 
 
-def _fake_parser(html, symbol, start, end):
+def _fake_parser(html, symbol):
     from re import findall
 
     return [

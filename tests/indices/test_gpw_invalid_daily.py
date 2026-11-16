@@ -35,7 +35,7 @@ def test_tolerant_mode_preserves_valid_day(caplog):
     )
     assert result["date"].tolist() == [date(2026, 11, 3)]
     assert result["close"].tolist() == [11.5]
-    assert "SKIP INVALID GPW CANDLE BLO.WA 2026-11-02" in caplog.text
+    assert "SKIP INVALID EQUITY CANDLE BLO.WA 2026-11-02" in caplog.text
 
 
 def test_tolerant_mode_all_invalid_returns_empty():

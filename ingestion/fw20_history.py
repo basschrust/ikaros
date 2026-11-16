@@ -25,7 +25,7 @@ class _Tables(HTMLParser):
         self.cell_depth = 0
         self.current = None
 
-    def handle_starttag(self, tag, attrs):
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag == "table":
             if self.depth == 0:
                 self.rows = []
@@ -38,7 +38,7 @@ class _Tables(HTMLParser):
         elif self.current is not None:
             self.cell_depth += 1
 
-    def handle_endtag(self, tag):
+    def handle_endtag(self, tag: str):
         if self.current is not None:
             if tag in ("td", "th") and self.cell_depth == 1:
                 self.cells.append(" ".join("".join(self.current).split()))

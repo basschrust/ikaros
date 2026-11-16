@@ -10,6 +10,8 @@ from datetime import date
 from io import StringIO
 import math
 import pandas as pd
+from snowflake.connector import SnowflakeConnection
+from snowflake.connector.cursor import SnowflakeCursor
 
 SOURCE = "stooq|wig20|daily"
 COLUMNS = ["date", "open", "high", "low", "close"]
@@ -65,7 +67,9 @@ def parse_csv(content: str, *, start: date, end: date) -> pd.DataFrame:
     return frame.sort_values("date").reset_index(drop=True)
 
 
-def check_overlaps(conn, frame: pd.DataFrame, *, tolerance: float = 0.5) -> tuple[int, list]:
+def check_overlaps(
+    conn: SnowflakeCursor, frame: pd.DataFrame, *, tolerance: float = 0.5
+) -> tuple[int, list]:
     """Check closings against existing index records; abort on material disagreement."""
     first, last = frame.iloc[0]["date"], frame.iloc[-1]["date"]
     with closing(conn.cursor()) as cur:
@@ -85,7 +89,7 @@ def check_overlaps(conn, frame: pd.DataFrame, *, tolerance: float = 0.5) -> tupl
     return len(existing), mismatches
 
 
-def insert_missing(conn, frame: pd.DataFrame, *, batch_size: int = 500) -> int:
+def insert_missing(conn: SnowflakeConnection, frame: pd.DataFrame, *, batch_size: int = 500) -> int:
     """Stage and merge only previously missing WIG20 dates, without changing other sources."""
     if frame.empty:
         return 0

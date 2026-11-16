@@ -1,7 +1,6 @@
-"""Plan incremental Snowflake market-data refreshes without rewriting existing data.
+"""Plan incremental Snowflake market-data refreshes, without Kafka.
 
-One database read per dataset, grouped worker commands, no Kafka dependency.
-This is a latest-date catch-up, not a scanner for interior historical gaps.
+Latest-date catch-up; does not repair historical interior gaps.
 """
 
 from __future__ import annotations
@@ -10,11 +9,9 @@ from collections import defaultdict
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-import logging
 import sys
 from zoneinfo import ZoneInfo
-
-LOG = logging.getLogger(__name__)
+from snowflake.connector import SnowflakeConnection
 
 YAHOO_FX = frozenset(
     "AUDPLN=X AUDUSD=X CHFPLN=X DKKPLN=X EURAUD=X EURCAD=X EURCHF=X "
@@ -23,10 +20,34 @@ YAHOO_FX = frozenset(
     "USDCNY=X USDDKK=X USDJPY=X USDNOK=X USDPLN=X USDSEK=X USDSGD=X".split()
 )
 
-# FW20 remains a supported explicit dataset, but the default run uses
-# DERIVATIVES instead: this includes FW20 and every other future and option.
-DATASETS = ("GPW", "FX", "WIG20", "FW20", "DERIVATIVES", "RATES")
-DEFAULT_DATASETS = ("GPW", "FX", "WIG20", "DERIVATIVES", "RATES")
+# Keep FW20 selectable for old operators; DERIVATIVES supersedes it in defaults.
+DATASETS = (
+    "GPW",
+    "US",
+    "PSE",
+    "XETRA",
+    "PARIS",
+    "LSE",
+    "BSE",
+    "FX",
+    "WIG20",
+    "FW20",
+    "DERIVATIVES",
+    "RATES",
+)
+DEFAULT_DATASETS = (
+    "GPW",
+    "US",
+    "PSE",
+    "XETRA",
+    "PARIS",
+    "LSE",
+    "BSE",
+    "FX",
+    "WIG20",
+    "DERIVATIVES",
+    "RATES",
+)
 DERIVATIVE_EMPTY_LOOKBACK_DAYS = 7
 
 
@@ -57,7 +78,7 @@ def yesterday_warsaw() -> date:
     return datetime.now(ZoneInfo("Europe/Warsaw")).date() - timedelta(days=1)
 
 
-def as_date(value) -> date | None:
+def as_date(value: datetime | date | None) -> date | None:
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -67,63 +88,59 @@ def as_date(value) -> date | None:
     return date.fromisoformat(str(value)[:10])
 
 
-def fetch_inventory(connection, dataset: str) -> list[Instrument]:
-    """Query registered instruments, retaining those without price records."""
-    if dataset == "GPW":
+def fetch_inventory(connection: SnowflakeConnection, dataset: str) -> list[Instrument]:
+    """Retain registered instruments without any observations."""
+    if dataset in {"GPW", "US", "PSE", "XETRA", "PARIS", "LSE", "BSE"}:
         sql = '''SELECT s."SYMBOL", MAX(TO_DATE(p."DATE"))
-                 FROM "SECURITIES" s LEFT JOIN "PRICES" p
-                   ON p."SYMBOL" = s."SYMBOL"
-                 WHERE s."VENUE" = 'GPW'
+                 FROM "SECURITIES" s LEFT JOIN "PRICES" p ON p."SYMBOL" = s."SYMBOL"
+                 WHERE s."VENUE" = %s
                  GROUP BY s."SYMBOL" ORDER BY s."SYMBOL"'''
+        params = (dataset,)
     elif dataset == "FX":
         sql = '''SELECT c."SYMBOL", MAX(TO_DATE(r."DATE"))
                  FROM "CURRENCY_PAIRS" c LEFT JOIN "FX_RATES" r
-                   ON r."CURRENCY_PAIR_ID" = c."CURRENCY_PAIR_ID"
+                    ON r."CURRENCY_PAIR_ID" = c."CURRENCY_PAIR_ID"
                  WHERE c."IS_ACTIVE" = TRUE
                  GROUP BY c."SYMBOL" ORDER BY c."SYMBOL"'''
+        params = ()
     elif dataset == "WIG20":
         sql = """SELECT 'WIG20', MAX(TO_DATE("DATE")) FROM "INDEX_PRICES"
                  WHERE "INDEX_SYMBOL" = 'WIG20' """
+        params = ()
     elif dataset == "RATES":
         sql = '''SELECT s."SERIES_ID", MAX(o."DATE")
                  FROM "RATE_SERIES" s LEFT JOIN "RATE_OBSERVATIONS" o
-                 ON s."SERIES_ID" = o."SERIES_ID"
-                 WHERE s."IS_ACTIVE" = TRUE
+                 ON s."SERIES_ID"=o."SERIES_ID" WHERE s."IS_ACTIVE"=TRUE
                  GROUP BY s."SERIES_ID" ORDER BY s."SERIES_ID"'''
+        params = ()
     elif dataset in {"FW20", "DERIVATIVES"}:
         predicate = (
             """c."INSTRUMENT_TYPE" = 'FUTURE' AND c."UNDERLYING_SYMBOL" = 'WIG20' """
             if dataset == "FW20"
-            else """c."INSTRUMENT_TYPE" IN ('FUTURE', 'OPTION') """
+            else """c."INSTRUMENT_TYPE" IN ('FUTURE','OPTION') """
         )
         sql = (
             """SELECT c."CONTRACT_ID", MAX(TO_DATE(p."DATE")), c."EXPIRY_DATE"
-               FROM "DERIVATIVE_CONTRACTS" c
-               LEFT JOIN "DERIVATIVE_PRICES" p
-                 ON p."CONTRACT_ID" = c."CONTRACT_ID"
-               WHERE """
+               FROM "DERIVATIVE_CONTRACTS" c LEFT JOIN "DERIVATIVE_PRICES" p
+               ON p."CONTRACT_ID" = c."CONTRACT_ID" WHERE """
             + predicate
-            + '''GROUP BY c."CONTRACT_ID", c."EXPIRY_DATE"
-               ORDER BY c."CONTRACT_ID"'''
+            + '''GROUP BY c."CONTRACT_ID", c."EXPIRY_DATE" ORDER BY c."CONTRACT_ID"'''
         )
+        params = ()
     else:
         raise ValueError(f"Unsupported dataset: {dataset}")
     with closing(connection.cursor()) as cur:
-        cur.execute(sql)
-        result = cur.fetchall()
+        cur.execute(sql, params) if params else cur.execute(sql)
+        rows = cur.fetchall()
     return [
-        Instrument(str(row[0]), as_date(row[1]), as_date(row[2]) if len(row) > 2 else None)
-        for row in result
-        if row[0]
+        Instrument(str(r[0]), as_date(r[1]), as_date(r[2]) if len(r) > 2 else None)
+        for r in rows
+        if r[0]
     ]
 
 
 def latest_start(
-    latest: date | None,
-    target: date,
-    *,
-    overlap: int,
-    bootstrap: date | None,
+    latest: date | None, target: date, *, overlap: int, bootstrap: date | None
 ) -> date | None:
     if latest is None:
         return bootstrap
@@ -155,21 +172,19 @@ def build_plan(
         raise ValueError("Invalid overlap, max gap, or batch size")
     if bootstrap_start is not None and bootstrap_start > target:
         raise ValueError("Bootstrap start must not be after target")
-    # update_all.py defaults to every choice in DATASETS. When both are
-    # present, DERIVATIVES supersedes its FW20 subset. Keep FW20 available
-    # for explicit legacy runs and old callers.
-    supersede_fw20 = "DERIVATIVES" in datasets and "DERIVATIVES" in inventories
+    for dataset in datasets:
+        if dataset not in DATASETS:
+            raise ValueError(f"Unsupported dataset: {dataset}")
     jobs: list[Job] = []
     skipped: list[str] = []
     groups: dict[tuple[str, date], list[str]] = defaultdict(list)
     derivative_groups: dict[tuple[date, date], list[str]] = defaultdict(list)
     rate_groups: dict[date, list[str]] = defaultdict(list)
-
+    # When both were selected, avoid scheduling WIG20 futures twice.
+    supersede_fw20 = "DERIVATIVES" in datasets and "DERIVATIVES" in inventories
     for dataset in datasets:
         if dataset == "FW20" and supersede_fw20:
             continue
-        if dataset not in DATASETS:
-            raise ValueError(f"Unsupported dataset: {dataset}")
         for item in inventories.get(dataset, []):
             symbol = item.symbol
             if dataset in {"FW20", "DERIVATIVES"} and item.expiry is None:
@@ -188,13 +203,10 @@ def build_plan(
                     continue
             else:
                 source = dataset
-
             if item.latest is None:
                 if dataset == "RATES":
                     start = bootstrap_start or target - timedelta(days=30)
                 elif dataset == "DERIVATIVES":
-                    # Include newly registered derivatives without triggering a
-                    # multi-year backfill on an everyday refresh.
                     start = bootstrap_start or target - timedelta(
                         days=DERIVATIVE_EMPTY_LOOKBACK_DAYS - 1
                     )
@@ -210,39 +222,38 @@ def build_plan(
                 start = latest_start(
                     item.latest, target, overlap=overlap_days, bootstrap=bootstrap_start
                 )
-            if start is None:
+            if start is None or start > target:
                 continue
-            if start > target:
-                continue
+            duration = (target - start).days + 1
             if source == "RATES":
-                # A 30-day bootstrap is safe; historical backfills remain explicit.
-                if (target - start).days + 1 > max_gap_days:
-                    skipped.append(
-                        f"RATES {symbol}: {start}..{target} exceeds "
-                        f"--max-gap-days={max_gap_days}; use explicit backfill"
-                    )
+                if duration > max_gap_days:
+                    skipped.append(f"RATES {symbol}: {duration} days exceeds max gap")
                     continue
                 rate_groups[start].append(symbol)
             elif source == "DERIVATIVES":
-                # Historical series can be sparse. Their latest stored trade can
-                # be months old even when the feed is healthy: cap daily scan.
-                if (target - start).days + 1 > max_gap_days:
-                    skipped.append(
-                        f"DERIVATIVES {symbol}: {start}..{target} exceeds "
-                        f"--max-gap-days={max_gap_days}; use explicit backfill"
-                    )
+                if duration > max_gap_days:
+                    skipped.append(f"DERIVATIVES {symbol}: {duration} days exceeds max gap")
                     continue
                 derivative_groups[(start, target)].append(symbol)
-            elif source in {"GPW", "FX-YAHOO", "FX-NBP"}:
-                if (target - start).days + 1 > max_gap_days:
+            elif source in {
+                "GPW",
+                "US",
+                "PSE",
+                "XETRA",
+                "PARIS",
+                "LSE",
+                "BSE",
+                "FX-YAHOO",
+                "FX-NBP",
+            }:
+                if duration > max_gap_days:
                     skipped.append(
-                        f"{dataset} {symbol}: {start}..{target} exceeds "
-                        f"--max-gap-days={max_gap_days}; run explicit backfill"
+                        f"{dataset} {symbol}: {start}..{target} exceeds --max-gap-days={max_gap_days}; run explicit backfill"
                     )
                     continue
                 groups[(source, start)].append(symbol)
             elif source == "WIG20":
-                days = max(2, (target - start).days + 1)
+                days = max(2, duration)
                 if days > max_gap_days:
                     skipped.append("WIG20: too stale for short Yahoo refresh; use CSV backfill")
                     continue
@@ -256,19 +267,20 @@ def build_plan(
                     )
                 )
             elif source == "FW20":
-                days = max(2, (target - start).days + 1)
+                days = max(2, duration)
                 if days > 12:
                     skipped.append(
                         f"FW20 {symbol}: long gap {start}..{target}; use full-page backfill"
                     )
                     continue
                 groups[(source, start)].append(symbol)
-
     for (source, start), symbols in sorted(groups.items(), key=lambda x: (x[0][0], x[0][1])):
         for chunk in _chunks(sorted(set(symbols)), batch_size):
-            if source == "GPW":
+            if source in {"GPW", "US", "PSE", "XETRA", "PARIS", "LSE", "BSE"}:
                 argv = worker(
-                    "run.backfill_gpw_snowflake",
+                    "run.backfill_equities",
+                    "--venue",
+                    source,
                     "--symbols",
                     *chunk,
                     "--start",
@@ -278,7 +290,6 @@ def build_plan(
                     "--iic-force",
                     "--continue-on-error",
                 )
-                label = "GPW"
             elif source == "FX-YAHOO":
                 argv = worker(
                     "run.backfill_fx_snowflake",
@@ -291,7 +302,6 @@ def build_plan(
                     "--iic-force",
                     "--continue-on-error",
                 )
-                label = "FX-YAHOO"
             elif source == "FX-NBP":
                 argv = worker(
                     "run.backfill_fx_nbp",
@@ -303,7 +313,6 @@ def build_plan(
                     target.isoformat(),
                     "--continue-on-error",
                 )
-                label = "FX-NBP"
             else:
                 days = max(2, (target - start).days + 1)
                 argv = worker(
@@ -315,13 +324,9 @@ def build_plan(
                     "--days",
                     str(days),
                 )
-                label = "FW20"
-            jobs.append(Job(label, chunk, start, target, argv))
-
+            jobs.append(Job(source, chunk, start, target, argv))
     for (start, end), symbols in sorted(derivative_groups.items()):
         for batch_no, chunk in enumerate(_chunks(sorted(set(symbols)), batch_size), 1):
-            # Every backfill subprocess normally writes to the same CSV path;
-            # give each group its own report to preserve failures and NO_DATA.
             report = (
                 f"output/derivative_update_{start:%Y%m%d}_{end:%Y%m%d}_{batch_no}_{chunk[0]}.csv"
             )
@@ -337,7 +342,6 @@ def build_plan(
                 report,
             )
             jobs.append(Job("DERIVATIVES", chunk, start, end, argv))
-
     for start, symbols in sorted(rate_groups.items()):
         for chunk in _chunks(sorted(set(symbols)), batch_size):
             jobs.append(
@@ -357,20 +361,20 @@ def build_plan(
                     ),
                 )
             )
-
-    jobs.sort(
-        key=lambda j: (
-            {
-                "GPW": 0,
-                "FX-YAHOO": 1,
-                "FX-NBP": 2,
-                "WIG20": 3,
-                "FW20": 4,
-                "DERIVATIVES": 4,
-                "RATES": 5,
-            }[j.dataset],
-            j.start,
-            j.symbols,
-        )
-    )
+    priority = {
+        "GPW": 0,
+        "US": 1,
+        "PSE": 2,
+        "XETRA": 3,
+        "PARIS": 4,
+        "LSE": 5,
+        "BSE": 6,
+        "FX-YAHOO": 7,
+        "FX-NBP": 8,
+        "WIG20": 9,
+        "FW20": 10,
+        "DERIVATIVES": 10,
+        "RATES": 11,
+    }
+    jobs.sort(key=lambda j: (priority[j.dataset], j.start, j.symbols))
     return Plan(jobs, skipped, target)

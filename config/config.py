@@ -4,6 +4,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 import yaml
+from yaml.nodes import ScalarNode
+
 
 DEFAULT_CONFIG = "instruments.yaml"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -23,7 +25,7 @@ class IncludeLoader(yaml.SafeLoader):
     pass
 
 
-def include_constructor(loader, node):
+def include_constructor(loader: IncludeLoader, node: ScalarNode):
     relative_path = loader.construct_scalar(node)
     base_path = Path(loader.name).parent
     file_path = base_path / relative_path

@@ -11,6 +11,7 @@ import logging
 from datetime import date
 
 import pandas as pd
+from snowflake.connector import SnowflakeConnection
 
 from config.config import load_config
 from database.repositories.factory import repository_from_config
@@ -49,7 +50,9 @@ WHEN NOT MATCHED THEN INSERT (
 """
 
 
-def fetch_close_rows(connection, symbol: str, start: date, end: date) -> pd.DataFrame:
+def fetch_close_rows(
+    connection: SnowflakeConnection, symbol: str, start: date, end: date
+) -> pd.DataFrame:
     """Read directly from Snowflake; no Yahoo API calls required."""
     with connection.cursor() as cur:
         cur.execute(
@@ -64,7 +67,7 @@ def fetch_close_rows(connection, symbol: str, start: date, end: date) -> pd.Data
     return pd.DataFrame(records, columns=["date", "close"])
 
 
-def target_dates(connection, pair_id: int, start: date, end: date) -> set[str]:
+def target_dates(connection: SnowflakeConnection, pair_id: int, start: date, end: date) -> set[str]:
     with connection.cursor() as cur:
         cur.execute(
             'SELECT TO_VARCHAR("DATE", \'YYYY-MM-DD\') FROM "FX_RATES" '
@@ -76,7 +79,7 @@ def target_dates(connection, pair_id: int, start: date, end: date) -> set[str]:
         return {str(item[0]) for item in cur.fetchall()}
 
 
-def merge_closes(connection, pair_id: int, frame: pd.DataFrame) -> int:
+def merge_closes(connection: SnowflakeConnection, pair_id: int, frame: pd.DataFrame) -> int:
     """Atomic insert-only MERGE, including a provenance comment."""
     if frame.empty:
         return 0

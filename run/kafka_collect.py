@@ -11,6 +11,8 @@ import logging
 import os
 import time
 
+from confluent_kafka import Producer, Message, KafkaError
+
 from ingestion.kafka_inbound import Observation, TOPICS
 from ikaros_app.collection import DailyCollector
 
@@ -21,11 +23,18 @@ def observations(*, dataset: str, symbol: str, days: int) -> list[Observation]:
     return DailyCollector().collect(dataset=dataset, symbol=symbol, days=days)
 
 
-def publish(producer, dataset: str, events: list[Observation]) -> int:
+def publish(
+    producer: Producer,
+    dataset: str,
+    events: list[Observation],
+) -> int:
     failures: list[str] = []
     acknowledgements = []
 
-    def delivered(err, message):
+    def delivered(
+        err: KafkaError | None,
+        message: Message,
+    ):
         if err:
             failures.append(str(err))
         else:

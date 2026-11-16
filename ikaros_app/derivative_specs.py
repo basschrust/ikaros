@@ -10,6 +10,7 @@ import argparse
 from contextlib import closing
 from pathlib import Path
 from typing import Any
+from snowflake.connector import SnowflakeConnection
 
 import pandas as pd
 
@@ -69,7 +70,9 @@ def validate_manifest(frame: pd.DataFrame) -> list[dict]:
     return result
 
 
-def register_metadata(connection, rows: list[dict], *, write: bool) -> tuple[int, int]:
+def register_metadata(
+    connection: SnowflakeConnection, rows: list[dict], *, write: bool
+) -> tuple[int, int]:
     """Create missing metadata, refuse conflicts; no changes to contracts/prices.
 
     Requires sql/derivatives/01_extend_registry.sql previously applied.

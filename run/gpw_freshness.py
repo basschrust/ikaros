@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from collections.abc import Iterable
 from contextlib import closing
 from datetime import date
 from pathlib import Path
@@ -44,7 +45,7 @@ def _as_date(value):
     return pd.Timestamp(value).date()
 
 
-def build_report(rows, *, expected: date, allowed_lag: int) -> pd.DataFrame:
+def build_report(rows: Iterable, *, expected: date, allowed_lag: int) -> pd.DataFrame:
     results = []
     for symbol, name, total, first, last, in_period in rows:
         observed = _as_date(last)

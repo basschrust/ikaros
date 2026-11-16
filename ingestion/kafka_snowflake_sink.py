@@ -7,15 +7,18 @@ stream consumption uses Kafka consumer-group offsets as its progress mechanism.
 from __future__ import annotations
 
 from contextlib import closing
+
+
 from ingestion.kafka_inbound import Observation
+from snowflake.connector import SnowflakeConnection
 
 
-def pair_id(connection, symbol: str) -> int:
+def pair_id(connection: SnowflakeConnection, symbol: str) -> int:
     with closing(connection.cursor()) as cur:
         cur.execute(
-            'SELECT "CURRENCY_PAIR_ID" FROM "CURRENCY_PAIRS" '
+            command='SELECT "CURRENCY_PAIR_ID" FROM "CURRENCY_PAIRS" '
             'WHERE "SYMBOL" = %s AND "IS_ACTIVE" = TRUE',
-            (symbol,),
+            params=(symbol,),
         )
         ids = [row[0] for row in cur.fetchall()]
     if len(ids) != 1:
@@ -23,7 +26,7 @@ def pair_id(connection, symbol: str) -> int:
     return int(ids[0])
 
 
-def upsert_observation(connection, event: Observation) -> None:
+def upsert_observation(connection: SnowflakeConnection, event: Observation) -> None:
     """Atomic single-row MERGE; duplicates are safe in a single-consumer deployment.
 
     Existing rows are updated to capture revised provider candles. For FX,

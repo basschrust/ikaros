@@ -11,6 +11,9 @@ from datetime import datetime, timezone
 import logging
 import os
 
+from confluent_kafka import Message, KafkaError
+
+from ingestion.contract_discovery import Candidate
 from providers.derivatives.listings import collect_candidates, sources
 
 LOG = logging.getLogger(__name__)
@@ -23,7 +26,7 @@ def run(
     snapshot_futures: str | None = None,
     snapshot_options: str | None = None,
     options_source: str = "bankier",
-):
+) -> list[Candidate]:
     adapters = sources(
         futures_html=snapshot_futures, options_html=snapshot_options, options_source=options_source
     )
@@ -52,7 +55,10 @@ def run(
     failures: list[str] = []
     acks: list[int] = []
 
-    def delivered(err, message):
+    def delivered(
+        err: KafkaError | None,
+        message: Message,
+    ):
         if err:
             failures.append(str(err))
         else:
