@@ -15,6 +15,9 @@ from datetime import date
 from typing import Any
 
 import pandas as pd
+import snowflake.connector
+
+from snowflake.connector.pandas_tools import write_pandas
 
 # Optional dependency: importing the local factory does not require Snowflake.
 
@@ -162,9 +165,7 @@ class SnowflakeRepository:
         password: str | None = None,
         authenticator: str = "snowflake",
         role: str | None = None,
-    ):
-        import snowflake.connector
-
+    ) -> None:
         self.database, self.schema, self.warehouse = map(_ident, (database, schema, warehouse))
         kwargs: dict[str, Any] = {
             "account": account or os.environ["SNOWFLAKE_ACCOUNT"],
@@ -208,7 +209,6 @@ class SnowflakeRepository:
     def _insert_frame(self, table: str, df: pd.DataFrame) -> None:
         if df.empty:
             return
-        from snowflake.connector.pandas_tools import write_pandas
 
         fields = WRITE_COLUMNS[table]
         absent = set(fields) - set(df.columns)
@@ -289,32 +289,36 @@ class SnowflakeRepository:
                 raise
 
     def get_calendar(self, calendar_id: int) -> pd.DataFrame:
-        return self._query('SELECT * FROM "CALENDARS" WHERE "CALENDAR_ID" = %s', (calendar_id,))
+        return self._query(
+            sql='SELECT * FROM "CALENDARS" WHERE "CALENDAR_ID" = %s', params=(calendar_id,)
+        )
 
     def get_trading_days(self, calendar_id: int, year: int) -> pd.DataFrame:
         start, end = date(year, 1, 1), date(year + 1, 1, 1)
         return self._query(
-            'SELECT * FROM "TRADING_DAYS" WHERE "CALENDAR_ID" = %s '
+            sql='SELECT * FROM "TRADING_DAYS" WHERE "CALENDAR_ID" = %s '
             'AND "DATE" >= %s AND "DATE" < %s ORDER BY "DATE"',
-            (calendar_id, start, end),
+            params=(calendar_id, start, end),
         )
 
     def get_securities(self, venue: str | None = None) -> pd.DataFrame:
         if venue is None:
             return self._query('SELECT * FROM "SECURITIES"')
-        return self._query('SELECT * FROM "SECURITIES" WHERE "VENUE" = %s', (venue,))
+        return self._query(sql='SELECT * FROM "SECURITIES" WHERE "VENUE" = %s', params=(venue,))
 
     def get_currencies(self) -> pd.DataFrame:
         return self._query('SELECT * FROM "CURRENCIES"')
 
     def get_currency_pairs(self) -> pd.DataFrame:
-        return self._query('SELECT * FROM "CURRENCY_PAIRS" WHERE "IS_ACTIVE" = %s', (True,))
+        return self._query(
+            sql='SELECT * FROM "CURRENCY_PAIRS" WHERE "IS_ACTIVE" = %s', params=(True,)
+        )
 
     def close(self) -> None:
         self.connection.close()
 
-    def __enter__(self):
+    def __enter__(self) -> SnowflakeRepository:
         return self
 
-    def __exit__(self, *_args):
+    def __exit__(self, *_args) -> None:
         self.close()

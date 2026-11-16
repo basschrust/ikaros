@@ -84,7 +84,7 @@ def normalize_batch(
     rows = []
     for row in batch.itertuples(index=False):
 
-        def number(value):
+        def number(value: float|int):
             return None if pd.isna(value) else float(value)
 
         rows.append(

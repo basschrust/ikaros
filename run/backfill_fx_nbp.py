@@ -52,7 +52,9 @@ def fetch_tables(session: Session, start: date, end: date, *, timeout: int = 30)
     return parse_table(payload)
 
 
-def persist(connection: SnowflakeConnection, rows, ids: dict[str, int]):
+def persist(
+    connection: SnowflakeConnection, rows: list[tuple[str, date, float, str]], ids: dict[str, int]
+):
     """Atomic insert-only MERGE per date-window, preserving all market-source rows."""
     if not rows:
         return 0

@@ -212,7 +212,7 @@ class ECBESTRProvider:
     _WINDOW_DAYS = 60
 
     @staticmethod
-    def _request(session, start: date, end: date) -> list[RateObservation]:
+    def _request(session: Session, start: date, end: date) -> list[RateObservation]:
         last_error = None
         for attempt in range(ECBESTRProvider._MAX_ATTEMPTS):
             try:
