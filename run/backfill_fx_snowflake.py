@@ -18,13 +18,42 @@ from config.config import load_config
 from database.repositories.factory import repository_from_config
 from run.ingest_fx_rates import fetch_fx_history
 from ingestion.iic import BatchKey, SnowflakeIIC, Status
+from decimal import Decimal, InvalidOperation
+
+
+def price_value(value: int | float | str | Decimal) -> Decimal:
+    if pd.isna(value):
+        raise ValueError("OHLC price cannot be NULL")
+
+    try:
+        return Decimal(str(value))
+    except InvalidOperation as exc:
+        raise ValueError(f"Invalid price: {value!r}") from exc
+
+
+def volume_value(
+    value: int | float | str | Decimal | None,
+) -> int | None:
+    if value is None or pd.isna(value):
+        return None
+
+    number = Decimal(str(value))
+    if not number.is_finite() or number < 0 or number != number.to_integral_value():
+        raise ValueError(f"Invalid volume: {value!r}")
+
+    return int(number)
+
 
 LOGGER = logging.getLogger(__name__)
 
 STAGE_DDL = """
 CREATE TEMPORARY TABLE IF NOT EXISTS IKAROS_FX_BACKFILL_STAGE (
     CURRENCY_PAIR_ID NUMBER(38,0), SYMBOL VARCHAR, TRADE_DATE VARCHAR,
-    OPEN FLOAT, HIGH FLOAT, LOW FLOAT, CLOSE FLOAT, VOLUME FLOAT
+    OPEN NUMBER(24,8),
+    HIGH NUMBER(24,8),
+    LOW NUMBER(24,8),
+    CLOSE NUMBER(24,8),
+    VOLUME NUMBER(38,0)
 )
 """
 
@@ -83,20 +112,16 @@ def normalize_batch(
         raise ValueError(f"{symbol}: NULL OHLC detected; aborting batch")
     rows = []
     for row in batch.itertuples(index=False):
-
-        def number(value: float|int):
-            return None if pd.isna(value) else float(value)
-
         rows.append(
             (
                 pair_id,
                 symbol,
                 row.date.isoformat(),
-                number(row.open),
-                number(row.high),
-                number(row.low),
-                number(row.close),
-                number(row.volume),
+                price_value(row.open),
+                price_value(row.high),
+                price_value(row.low),
+                price_value(row.close),
+                volume_value(row.volume),
             )
         )
     return rows
