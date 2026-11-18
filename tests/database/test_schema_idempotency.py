@@ -1,6 +1,8 @@
-"""Schema regression tests; fully offline and independent of Snowflake credentials."""
+"""Offline Snowflake catalog tests: schema and candidate-ID sequence are rerunnable."""
 
 from __future__ import annotations
+
+import pytest
 
 from database.schema import BASE_COLUMNS, NEW_COLUMNS, _type, prepare_tables
 
@@ -24,6 +26,8 @@ class SnowflakeCursor:
             self.connection.tables.setdefault(
                 table, set(c.upper() for c in ((BASE_COLUMNS | NEW_COLUMNS)[table.lower()]))
             )
+        elif upper.startswith("CREATE SEQUENCE IF NOT EXISTS"):
+            self.connection.sequence_exists = True
         elif upper.startswith('SELECT "COLUMN_NAME" FROM INFORMATION_SCHEMA.COLUMNS'):
             table = upper.split("TABLE_NAME = '")[1].split("'")[0]
             self.rows = [(c,) for c in self.connection.tables[table]]
@@ -49,36 +53,35 @@ class SnowflakeCursor:
 
 
 class SnowflakeConnection:
-    """Small simulated SQL catalog, including metadata and ALTER semantics."""
-
     def __init__(self):
         self.statements = []
         self.tables = {}
         self.primary_key = False
+        self.sequence_exists = False
 
     def cursor(self):
         return SnowflakeCursor(self)
 
 
-def test_snowflake_schema_initializes_twice_without_repeated_alters():
+def test_fresh_then_repeat_has_no_repeated_alter():
     conn = SnowflakeConnection()
     prepare_tables(conn, backend="snowflake")
-    statements_first = list(conn.statements)
+    first_count = len(conn.statements)
     prepare_tables(conn, backend="snowflake")
-    statements_second = conn.statements[len(statements_first) :]
+    second = conn.statements[first_count:]
     assert len(conn.tables) == len(BASE_COLUMNS) + len(NEW_COLUMNS) == 11
-    assert not any(" ADD COLUMN " in s for s in statements_second)
-    assert sum(" ADD CONSTRAINT " in s for s in conn.statements) == 1
+    assert conn.sequence_exists
+    assert not any(" ADD COLUMN " in s or " ADD CONSTRAINT " in s for s in second)
+    assert all("OR REPLACE SEQUENCE" not in s for s in conn.statements)
 
 
-def test_existing_database_adds_only_missing_columns():
+def test_existing_adds_only_missing_columns():
     conn = SnowflakeConnection()
     conn.tables["SECURITIES"] = {"ASSET_ID", "SYMBOL"}
     conn.tables["PRICES"] = {"SYMBOL", "DATE", "CLOSE", "ASSET_ID", "PROVIDER_ID"}
     prepare_tables(conn, backend="snowflake")
     added = [s for s in conn.statements if " ADD COLUMN " in s]
-    assert len(added) == 4  # IS_ACTIVE and 3 remaining PRICES metadata columns
-    assert all("IF NOT EXISTS" not in s for s in added)
+    assert len(added) == 4
     assert any('"IS_ACTIVE"' in s for s in added)
     assert not any('"PROVIDER_ID"' in s for s in added)
     before = len(conn.statements)
@@ -86,7 +89,7 @@ def test_existing_database_adds_only_missing_columns():
     assert not any(" ADD COLUMN " in s for s in conn.statements[before:])
 
 
-def test_snowflake_default_timestamp_is_preserved():
+def test_timestamp_default_kept():
     assert _type("TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP", "snowflake") == (
         "TIMESTAMP_NTZ NOT NULL DEFAULT CURRENT_TIMESTAMP"
     )
@@ -94,8 +97,6 @@ def test_snowflake_default_timestamp_is_preserved():
     assert _type("BIGINT", "snowflake") == "NUMBER(38,0)"
 
 
-def test_schema_rejects_unknown_backend():
-    import pytest
-
+def test_unknown_backend():
     with pytest.raises(ValueError, match="Unknown backend"):
         prepare_tables(SnowflakeConnection(), backend="sqlite")

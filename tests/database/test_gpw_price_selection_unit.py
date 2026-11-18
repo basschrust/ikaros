@@ -1,4 +1,4 @@
-"""Unit tests for consensus and safe candidate construction."""
+"""Selection and content fingerprints independent of integer surrogate PKs."""
 
 from datetime import date
 from decimal import Decimal
@@ -29,7 +29,7 @@ def candle(volume: int, close: str = "75.00") -> RawCandle:
     )
 
 
-def test_zero_yahoo_volume_stooq_and_biznesradar_confirm():
+def test_zero_yahoo_volume_and_other_sources_confirm():
     candidates = [
         make_candidate(mapping("YFINANCE", 1), candle(0)),
         make_candidate(mapping("STOOQ", 2), candle(1247844)),
@@ -41,7 +41,7 @@ def test_zero_yahoo_volume_stooq_and_biznesradar_confirm():
     assert decision.confirmed_by == ("BIZNESRADAR", "STOOQ")
 
 
-def test_all_three_provider_agreement_prefers_primary():
+def test_provider_agreement_prefers_primary():
     group = [
         make_candidate(mapping(code, i), candle(1247844))
         for i, code in enumerate(("YFINANCE", "STOOQ", "BIZNESRADAR"), 1)
@@ -49,7 +49,7 @@ def test_all_three_provider_agreement_prefers_primary():
     assert choose(group).candidate is group[0]
 
 
-def test_disagreement_falls_back_to_highest_priority_valid_source():
+def test_disagreement_falls_back_to_priority():
     group = [
         make_candidate(mapping("YFINANCE", 1), candle(1234567)),
         make_candidate(mapping("STOOQ", 2), candle(2100000)),
@@ -59,8 +59,7 @@ def test_disagreement_falls_back_to_highest_priority_valid_source():
     assert result.candidate is group[0]
     assert result.reason == "PRIORITY_SELECTED_DISAGREEMENT"
     strict = choose(group, minimum_confirmations=2)
-    assert strict.candidate is None
-    assert strict.reason == "CROSS_PROVIDER_CONFLICT"
+    assert strict.candidate is None and strict.reason == "CROSS_PROVIDER_CONFLICT"
 
 
 def test_candle_fields_are_never_blended():
@@ -71,15 +70,16 @@ def test_candle_fields_are_never_blended():
     assert choose(group).candidate.candle.close == Decimal("75.00")
 
 
-def test_candidate_id_is_replay_stable_and_source_sensitive():
+def test_content_hash_is_stable_and_source_sensitive():
     m = mapping("STOOQ", 2)
     a = make_candidate(m, candle(123))
-    assert a.candidate_id == make_candidate(m, candle(123)).candidate_id
-    assert a.candidate_id != make_candidate(m, candle(124)).candidate_id
+    assert a.content_hash == make_candidate(m, candle(123)).content_hash
+    assert a.content_hash != make_candidate(m, candle(124)).content_hash
+    assert len(a.content_hash) == 64
 
 
-def test_candidate_id_ignores_decimal_trailing_zeros():
+def test_content_hash_ignores_decimal_trailing_zeros():
     m = mapping("STOOQ", 2)
     a = RawCandle(DAY, Decimal("75"), Decimal("76"), Decimal("74"), Decimal("75"), 1000)
     b = RawCandle(DAY, Decimal("75.00"), Decimal("76.00"), Decimal("74.0"), Decimal("75.0"), 1000)
-    assert make_candidate(m, a).candidate_id == make_candidate(m, b).candidate_id
+    assert make_candidate(m, a).content_hash == make_candidate(m, b).content_hash

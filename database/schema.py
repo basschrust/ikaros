@@ -1,13 +1,17 @@
 """Single schema authority for Ikaros DuckDB and Snowflake (pre-1.0).
 
-prepare_tables() creates the complete current schema on fresh instances and
-extends pre-existing instances without dropping or modifying stored candles.
+Existing hash-key deployments require sql/20261118_integer_candidate_ids.sql
+before running a repository with this version. Schema initialization is
+idempotent; it never silently converts or drops persisted price candles.
 """
 
 from __future__ import annotations
+
+import re
 from typing import Any, Literal
 
 Backend = Literal["duckdb", "snowflake"]
+CANDIDATE_ID_SEQUENCE = "PRICES_CANDIDATES_ID_SEQ"
 
 BASE_COLUMNS: dict[str, dict[str, str]] = {
     "calendars": {
@@ -51,7 +55,7 @@ BASE_COLUMNS: dict[str, dict[str, str]] = {
         "split_ratio": "DOUBLE",
         "asset_id": "BIGINT",
         "provider_id": "BIGINT",
-        "candidate_id": "VARCHAR(64)",
+        "candidate_id": "BIGINT",
         "selected_at": "TIMESTAMP",
         "selection_reason": "VARCHAR",
     },
@@ -108,7 +112,8 @@ NEW_COLUMNS: dict[str, dict[str, str]] = {
         "created_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
     },
     "prices_candidates": {
-        "candidate_id": "VARCHAR(64) PRIMARY KEY",
+        "candidate_id": "BIGINT PRIMARY KEY",
+        "content_hash": "VARCHAR(64) NOT NULL UNIQUE",
         "asset_id": "BIGINT NOT NULL",
         "provider_id": "BIGINT NOT NULL",
         "provider_symbol_id": "BIGINT NOT NULL",
@@ -130,16 +135,11 @@ NEW_COLUMNS: dict[str, dict[str, str]] = {
 
 
 def _type(sql: str, backend: Backend) -> str:
-    """Translate SQL *type tokens*, not substrings in default expressions."""
+    """Convert only column type tokens, never CURRENT_TIMESTAMP defaults."""
     if backend == "snowflake":
-        import re
-
         sql = re.sub(r"\bBIGINT\b", "NUMBER(38,0)", sql)
         sql = re.sub(r"\bDECIMAL\(", "NUMBER(", sql)
         sql = re.sub(r"\bTIMESTAMP\b(?!\s*\()", "TIMESTAMP_NTZ", sql, count=1)
-        # The single TIMESTAMP token is always the leading column type in
-        # our declarations. CURRENT_TIMESTAMP must stay a valid SQL function.
-        return sql
     return sql
 
 
@@ -161,15 +161,12 @@ def _fetch(conn: Any, sql: str) -> list[tuple[Any, ...]]:
 
 
 def prepare_tables(connection: Any, *, backend: Backend) -> None:
-    """Create all 11 tables; extend only new columns on existing tables."""
+    """Create the full schema. Extend only documented legacy equity columns."""
     if backend not in ("duckdb", "snowflake"):
         raise ValueError(f"Unknown backend: {backend}")
     for table, columns in BASE_COLUMNS.items():
         fields = ", ".join(f'"{k.upper()}" {_type(v, backend)}' for k, v in columns.items())
         _execute(connection, f'CREATE TABLE IF NOT EXISTS "{table.upper()}" ({fields})')
-    # Explicitly inspect existing columns. Snowflake can reject
-    # ALTER TABLE ... ADD COLUMN IF NOT EXISTS for an existing column with
-    # SQL compilation error "ambiguous column name"; skip the DDL instead.
     for table in ("securities", "prices"):
         added = (
             ("is_active",)
@@ -198,27 +195,37 @@ def prepare_tables(connection: Any, *, backend: Backend) -> None:
                 )
     conflicts = _fetch(
         connection,
-        'SELECT "ASSET_ID", COUNT(*) FROM "SECURITIES" GROUP BY "ASSET_ID" HAVING "ASSET_ID" IS NULL OR COUNT(*) > 1 LIMIT 5',
+        'SELECT "ASSET_ID", COUNT(*) FROM "SECURITIES" GROUP BY "ASSET_ID" '
+        'HAVING "ASSET_ID" IS NULL OR COUNT(*) > 1 LIMIT 5',
     )
     if conflicts:
         raise ValueError(f"SECURITIES.ASSET_ID must be non-null and unique: {conflicts!r}")
     if backend == "duckdb":
         rows = _fetch(
             connection,
-            "SELECT COUNT(*) FROM duckdb_constraints() WHERE lower(table_name)='securities' AND constraint_type='PRIMARY KEY'",
+            "SELECT COUNT(*) FROM duckdb_constraints() "
+            "WHERE lower(table_name)='securities' AND constraint_type='PRIMARY KEY'",
         )
         if not rows[0][0]:
             _execute(connection, 'ALTER TABLE "SECURITIES" ADD PRIMARY KEY ("ASSET_ID")')
     else:
         rows = _fetch(
             connection,
-            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA=CURRENT_SCHEMA() AND TABLE_NAME='SECURITIES' AND CONSTRAINT_TYPE='PRIMARY KEY'",
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS "
+            "WHERE TABLE_SCHEMA=CURRENT_SCHEMA() AND TABLE_NAME='SECURITIES' "
+            "AND CONSTRAINT_TYPE='PRIMARY KEY'",
         )
         if not rows[0][0]:
             _execute(
                 connection,
-                'ALTER TABLE "SECURITIES" ADD CONSTRAINT "PK_SECURITIES_ASSET_ID" PRIMARY KEY ("ASSET_ID")',
+                'ALTER TABLE "SECURITIES" ADD CONSTRAINT "PK_SECURITIES_ASSET_ID" '
+                'PRIMARY KEY ("ASSET_ID")',
             )
+    # Sequence is created once. Never recreate/restart it on future runs.
+    _execute(
+        connection,
+        f'CREATE SEQUENCE IF NOT EXISTS "{CANDIDATE_ID_SEQUENCE}" START WITH 1 INCREMENT BY 1',
+    )
     constraints = {
         "provider_symbols": [
             'FOREIGN KEY ("ASSET_ID") REFERENCES "SECURITIES"("ASSET_ID")',

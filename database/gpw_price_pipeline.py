@@ -1,7 +1,9 @@
-"""Reconcile GPW candidates to the single authoritative PRICES table.
+"""Reconcile GPW source observations with authoritative PRICES.
 
-Only this module writes PRICES for the new multi-source job. Use one instance
-of this writer at a time; standard Snowflake primary keys are not enforced.
+CANDIDATE_ID is an integer surrogate key. CONTENT_HASH is a SHA-256
+fingerprint used only for idempotent deduplication and revision history.
+Run sql/20261118_integer_candidate_ids.sql before deploying to an existing
+Snowflake database. Use a single writer until atomic/locking MERGE is added.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from ingestion.decimal_prices import decimal_text, integer_text
 from ingestion.gpw_provider_feeds import RawCandle
 
 PROVIDER_CODES = frozenset({"YFINANCE", "STOOQ", "BIZNESRADAR"})
+CANDIDATE_SEQUENCE = '"PRICES_CANDIDATES_ID_SEQ".NEXTVAL'
 
 
 @dataclass(frozen=True)
@@ -37,7 +40,7 @@ class Mapping:
 class Candidate:
     mapping: Mapping
     candle: RawCandle
-    candidate_id: str
+    content_hash: str
     status: str
     reason: str | None
 
@@ -60,7 +63,7 @@ def _read_date(item: object) -> date:
 def load_mappings(
     connection: Any, *, symbols: Sequence[str] | None = None
 ) -> dict[int, list[Mapping]]:
-    """Load active GPW equities and mappings. Explicit selection must be complete."""
+    """Load active GPW equities with unambiguous time-bound provider mappings."""
     sql = """SELECT s."ASSET_ID", s."SYMBOL", p."PROVIDER_CODE", p."PROVIDER_ID",
                     ps."PROVIDER_SYMBOL_ID", ps."PROVIDER_SYMBOL", p."PRIORITY",
                     ps."VALID_FROM", ps."VALID_TO"
@@ -140,7 +143,6 @@ def make_candidate(
 ) -> Candidate:
     status, reason = _valid(candle, positive_volume=positive_volume)
 
-    # Stable across source formatting changes such as 75, 75.0 and 75.00.
     def canonical_number(value: Decimal | None) -> str:
         return "NULL" if value is None else format(value.normalize(), "f")
 
@@ -170,11 +172,6 @@ def _near(a: Decimal, b: Decimal, *, tolerance: Decimal) -> bool:
 
 
 def _agree_ohlc(a: RawCandle, b: RawCandle) -> bool:
-    """Verify two independent providers observed the same price envelope.
-
-    Volume is intentionally excluded: a ZERO_VOLUME candidate must never
-    contribute a volume, but its prices can corroborate a complete candle.
-    """
     if a.day != b.day:
         return False
     for attribute in ("open", "high", "low", "close"):
@@ -198,13 +195,7 @@ def choose(
     minimum_confirmations: int = 1,
     allow_one_volume_source: bool = False,
 ) -> Selection:
-    """Select an individually valid, whole-source OHLCV candle.
-
-    Default: choose the highest-priority VALID provider, even without a second
-    feed. Disagreements are retained as evidence, not used as a veto. Callers
-    may explicitly request legacy multi-source consensus (2 or 3 sources).
-    Never combine price or volume fields from different providers.
-    """
+    """Default to one valid complete candle; strict consensus remains opt-in."""
     if minimum_confirmations not in (1, 2, 3):
         raise ValueError("minimum_confirmations must be 1, 2 or 3")
     valid = [c for c in candidates if c.status == "VALID"]
@@ -212,7 +203,7 @@ def choose(
         if not valid:
             return Selection(None, "NO_VALID_SOURCE", ())
         selected = min(
-            valid, key=lambda c: (c.mapping.priority, c.mapping.provider_code, c.candidate_id)
+            valid, key=lambda c: (c.mapping.priority, c.mapping.provider_code, c.content_hash)
         )
         agreeing = tuple(
             sorted({c.mapping.provider_code for c in valid if _agree(selected.candle, c.candle)})
@@ -227,9 +218,6 @@ def choose(
         )
         return Selection(selected, reason, agreeing)
     if len({c.mapping.provider_code for c in valid}) < minimum_confirmations:
-        # Explicitly opt-in only: one VALID full OHLCV plus one independent
-        # zero-volume candle whose OHLC agrees. Never use the zero-volume
-        # candle for authoritative data, only as price corroboration.
         if allow_one_volume_source and minimum_confirmations == 2 and len(valid) == 1:
             reference = valid[0]
             corroborators = [
@@ -257,7 +245,6 @@ def choose(
             groups.append(group)
     if not groups:
         return Selection(None, "CROSS_PROVIDER_CONFLICT", ())
-    # Every member of the chosen cluster must agree with every other member.
     groups = [
         group for group in groups if all(_agree(a.candle, b.candle) for a in group for b in group)
     ]
@@ -265,7 +252,7 @@ def choose(
         return Selection(None, "NONTRANSITIVE_AGREEMENT", ())
     maximal = max(len({c.mapping.provider_code for c in group}) for group in groups)
     best = {
-        tuple(sorted(c.candidate_id for c in group)): group
+        tuple(sorted(c.content_hash for c in group)): group
         for group in groups
         if len({c.mapping.provider_code for c in group}) == maximal
     }
@@ -279,7 +266,7 @@ def choose(
 def _candidate_params(candidate: Candidate) -> tuple[object, ...]:
     c = candidate.candle
     return (
-        candidate.candidate_id,
+        candidate.content_hash,
         candidate.mapping.asset_id,
         candidate.mapping.provider_id,
         candidate.mapping.provider_symbol_id,
@@ -295,33 +282,51 @@ def _candidate_params(candidate: Candidate) -> tuple[object, ...]:
     )
 
 
-def persist_candidates(connection: Any, candidates: Sequence[Candidate]) -> int:
-    """Idempotent append-only observations. Call inside the caller's transaction."""
+def persist_candidates(
+    connection: Any, candidates: Sequence[Candidate]
+) -> tuple[int, dict[str, int]]:
+    """Append only new content hashes; return (insert count, hash -> integer PK).
+
+    The sequence allocates IDs, never MAX+1. Standard Snowflake tables do not
+    enforce unique keys; run only one writer until concurrency control exists.
+    """
     created = 0
-    sql = """INSERT INTO "PRICES_CANDIDATES"
-        ("CANDIDATE_ID","ASSET_ID","PROVIDER_ID","PROVIDER_SYMBOL_ID","SYMBOL","DATE",
-        "OPEN","HIGH","LOW","CLOSE","VOLUME","VALIDATION_STATUS","VALIDATION_REASON")
-        VALUES (%s,%s,%s,%s,%s,TO_DATE(%s,'YYYY-MM-DD'),
-        TO_DECIMAL(%s,24,8),TO_DECIMAL(%s,24,8),TO_DECIMAL(%s,24,8),
-        TO_DECIMAL(%s,24,8),TO_DECIMAL(%s,38,0),%s,%s)"""
+    ids: dict[str, int] = {}
+    sql = f"""INSERT INTO "PRICES_CANDIDATES"
+        ("CANDIDATE_ID","CONTENT_HASH","ASSET_ID","PROVIDER_ID","PROVIDER_SYMBOL_ID",
+         "SYMBOL","DATE","OPEN","HIGH","LOW","CLOSE","VOLUME",
+         "VALIDATION_STATUS","VALIDATION_REASON")
+        VALUES ({CANDIDATE_SEQUENCE},%s,%s,%s,%s,%s,TO_DATE(%s,'YYYY-MM-DD'),
+         TO_DECIMAL(%s,24,8),TO_DECIMAL(%s,24,8),TO_DECIMAL(%s,24,8),
+         TO_DECIMAL(%s,24,8),TO_DECIMAL(%s,38,0),%s,%s)"""
     with closing(connection.cursor()) as cur:
         for candidate in candidates:
             if candidate.candle.close is None:
-                # The schema requires CLOSE NOT NULL: record this in the job logs.
-                continue
+                continue  # CLOSE is NOT NULL in table; failure remains visible in job logs.
             cur.execute(
-                'SELECT 1 FROM "PRICES_CANDIDATES" WHERE "CANDIDATE_ID"=%s',
-                (candidate.candidate_id,),
+                'SELECT "CANDIDATE_ID" FROM "PRICES_CANDIDATES" WHERE "CONTENT_HASH"=%s',
+                (candidate.content_hash,),
             )
-            if cur.fetchall():
-                continue
-            cur.execute(sql, _candidate_params(candidate))
-            created += 1
-    return created
+            rows = cur.fetchall()
+            if len(rows) > 1:
+                raise RuntimeError("Duplicate CONTENT_HASH; stop writes and reconcile database")
+            if not rows:
+                cur.execute(sql, _candidate_params(candidate))
+                if cur.rowcount != 1:
+                    raise RuntimeError("Unexpected candidate insert count")
+                created += 1
+                cur.execute(
+                    'SELECT "CANDIDATE_ID" FROM "PRICES_CANDIDATES" WHERE "CONTENT_HASH"=%s',
+                    (candidate.content_hash,),
+                )
+                rows = cur.fetchall()
+            if len(rows) != 1 or rows[0][0] is None:
+                raise RuntimeError("Could not resolve integer candidate ID")
+            ids[candidate.content_hash] = int(rows[0][0])
+    return created, ids
 
 
 def _is_same(existing: tuple[object, ...], candle: RawCandle) -> bool:
-    # existing: symbol, open, high, low, close, volume, candidate_id
     for i, field in enumerate(("open", "high", "low", "close"), start=1):
         a, b = existing[i], getattr(candle, field)
         if (a is None) != (b is None):
@@ -335,14 +340,18 @@ def _is_same(existing: tuple[object, ...], candle: RawCandle) -> bool:
     )
 
 
-def promote(connection: Any, selection: Selection, *, canonical_symbol: str) -> str:
-    """Promote missing, identical or demonstrably suspect rows; preserve valid conflicts.
-
-    Assumes a single writer and an open transaction. Duplicate existing rows
-    trigger a hard failure rather than an ambiguous update.
-    """
+def promote(
+    connection: Any,
+    selection: Selection,
+    *,
+    canonical_symbol: str,
+    candidate_id: int | None = None,
+) -> str:
+    """Write selected integer reference; preserve conflicting valid price rows."""
     if selection.candidate is None:
         return "UNRESOLVED"
+    if candidate_id is None or not isinstance(candidate_id, int) or candidate_id < 1:
+        raise ValueError("An allocated positive integer candidate_id is required")
     item = selection.candidate
     candle, mapping = item.candle, item.mapping
     with closing(connection.cursor()) as cur:
@@ -377,13 +386,13 @@ def promote(connection: Any, selection: Selection, *, canonical_symbol: str) -> 
                     mapping.asset_id,
                     *fields,
                     mapping.provider_id,
-                    item.candidate_id,
+                    candidate_id,
                     selection.reason,
                 ),
             )
             return "INSERTED"
         existing = rows[0]
-        if existing[6] == item.candidate_id:
+        if existing[6] == candidate_id:
             return "UNCHANGED"
         same = _is_same(existing, candle)
         is_suspect = (
@@ -404,7 +413,7 @@ def promote(connection: Any, selection: Selection, *, canonical_symbol: str) -> 
             (
                 mapping.asset_id,
                 mapping.provider_id,
-                item.candidate_id,
+                candidate_id,
                 "MATCHED_EXISTING" if same else "REPAIRED_SUSPECT",
                 *fields,
                 candle.day.isoformat(),
@@ -430,8 +439,19 @@ def commit_day(
     with closing(connection.cursor()) as cur:
         try:
             cur.execute("BEGIN")
-            inserted = persist_candidates(connection, candidates)
-            outcome = promote(connection, selection, canonical_symbol=canonical_symbol)
+            inserted, ids = persist_candidates(connection, candidates)
+            if selection.candidate is None:
+                outcome = "UNRESOLVED"
+            else:
+                selected_id = ids.get(selection.candidate.content_hash)
+                if selected_id is None:
+                    raise RuntimeError("Selected candidate was not persisted; cannot promote")
+                outcome = promote(
+                    connection,
+                    selection,
+                    canonical_symbol=canonical_symbol,
+                    candidate_id=selected_id,
+                )
             cur.execute("COMMIT")
             return inserted, outcome
         except Exception:

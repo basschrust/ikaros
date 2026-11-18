@@ -1,0 +1,144 @@
+-- ONE-TIME Snowflake migration: SHA-256 candidate identifiers -> INTEGER keys.
+-- Compatible with Ikaros feature/clean_ge BEFORE deployment of the accompanying Python files.
+-- STOP ALL WRITERS (update_all, Kafka sinks, scheduler, CLI) BEFORE RUNNING.
+-- Execute sections in order in Snowsight. Do not run a second time.
+-- IMPORTANT: DDL auto-commits in Snowflake. Clones provide recovery points.
+
+USE DATABASE DAEDALUS;
+USE SCHEMA MARKET_DATA;
+
+-- A. PRE-FLIGHT. ALL three bad_* counts must be 0. If not, STOP.
+SELECT COUNT(*) AS bad_duplicate_candidate_hashes
+FROM (
+    SELECT "CANDIDATE_ID" FROM "PRICES_CANDIDATES"
+    GROUP BY "CANDIDATE_ID" HAVING COUNT(*) > 1
+);
+
+SELECT COUNT(*) AS bad_missing_candidate_hashes
+FROM "PRICES_CANDIDATES" WHERE "CANDIDATE_ID" IS NULL;
+
+SELECT COUNT(*) AS bad_orphaned_price_references
+FROM "PRICES" p
+WHERE p."CANDIDATE_ID" IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM "PRICES_CANDIDATES" c
+      WHERE c."CANDIDATE_ID" = p."CANDIDATE_ID"
+  );
+
+-- Confirm the current CANDIDATE_ID types are VARCHAR before proceeding.
+SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = CURRENT_SCHEMA()
+  AND TABLE_NAME IN ('PRICES', 'PRICES_CANDIDATES')
+  AND COLUMN_NAME = 'CANDIDATE_ID'
+ORDER BY TABLE_NAME;
+
+-- B. READ-ONLY ZERO-COPY BACKUP OF ALL EXISTING ROWS.
+-- If backup objects already exist, STOP and investigate before proceeding.
+CREATE TABLE "PRICES_CANDIDATES_BAK_20261118_INTKEY" CLONE "PRICES_CANDIDATES";
+CREATE TABLE "PRICES_BAK_20261118_INTKEY" CLONE "PRICES";
+
+-- C. STRUCTURE CHANGE. The existing SHA values are not discarded.
+-- Snowflake standard-table PKs are informational, so integrity is checked above.
+ALTER TABLE "PRICES_CANDIDATES" DROP PRIMARY KEY;
+ALTER TABLE "PRICES_CANDIDATES" RENAME COLUMN "CANDIDATE_ID" TO "CONTENT_HASH";
+ALTER TABLE "PRICES_CANDIDATES" ADD COLUMN "CANDIDATE_ID" NUMBER(38,0);
+
+ALTER TABLE "PRICES" RENAME COLUMN "CANDIDATE_ID" TO "LEGACY_CANDIDATE_HASH";
+ALTER TABLE "PRICES" ADD COLUMN "CANDIDATE_ID" NUMBER(38,0);
+
+-- D. BACKFILL DETERMINISTIC INT IDS, AND MAP ALL EXISTING PRICES LINKS.
+-- Run DML as one transaction; avoid ANY other writers while doing so.
+BEGIN TRANSACTION;
+
+UPDATE "PRICES_CANDIDATES" c
+SET "CANDIDATE_ID" = numbered.new_id
+FROM (
+    SELECT "CONTENT_HASH", ROW_NUMBER() OVER (ORDER BY "CONTENT_HASH") AS new_id
+    FROM "PRICES_CANDIDATES"
+) numbered
+WHERE c."CONTENT_HASH" = numbered."CONTENT_HASH";
+
+UPDATE "PRICES" p
+SET "CANDIDATE_ID" = c."CANDIDATE_ID"
+FROM "PRICES_CANDIDATES" c
+WHERE p."LEGACY_CANDIDATE_HASH" = c."CONTENT_HASH";
+
+COMMIT;
+
+-- E. VALIDATE COUNTS AND REFERENTIAL LINKS BEFORE ENFORCING CONSTRAINTS.
+-- Every *_mismatch / *_null / *_orphan count MUST be zero.
+SELECT
+    (SELECT COUNT(*) FROM "PRICES_CANDIDATES") AS candidate_rows,
+    (SELECT COUNT(*) FROM "PRICES_CANDIDATES_BAK_20261118_INTKEY") AS candidate_backup_rows,
+    (SELECT COUNT(*) FROM "PRICES") AS price_rows,
+    (SELECT COUNT(*) FROM "PRICES_BAK_20261118_INTKEY") AS price_backup_rows;
+
+SELECT COUNT(*) AS bad_null_integer_ids
+FROM "PRICES_CANDIDATES" WHERE "CANDIDATE_ID" IS NULL;
+
+SELECT COUNT(*) AS bad_duplicate_integer_ids
+FROM (
+    SELECT "CANDIDATE_ID" FROM "PRICES_CANDIDATES"
+    GROUP BY "CANDIDATE_ID" HAVING COUNT(*) > 1
+);
+
+SELECT COUNT(*) AS bad_integer_orphan_references
+FROM "PRICES" p
+WHERE p."CANDIDATE_ID" IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM "PRICES_CANDIDATES" c
+      WHERE c."CANDIDATE_ID" = p."CANDIDATE_ID"
+  );
+
+SELECT COUNT(*) AS bad_unmigrated_price_links
+FROM "PRICES"
+WHERE "LEGACY_CANDIDATE_HASH" IS NOT NULL
+  AND "CANDIDATE_ID" IS NULL;
+
+SELECT COUNT(*) AS bad_mismatched_price_links
+FROM "PRICES" p
+JOIN "PRICES_CANDIDATES" c ON p."CANDIDATE_ID" = c."CANDIDATE_ID"
+WHERE p."LEGACY_CANDIDATE_HASH" <> c."CONTENT_HASH";
+
+-- F. APPLY METADATA CONSTRAINTS ONLY AFTER EVERY CHECK ABOVE HAS PASSED.
+ALTER TABLE "PRICES_CANDIDATES" ALTER COLUMN "CANDIDATE_ID" SET NOT NULL;
+ALTER TABLE "PRICES_CANDIDATES" ADD CONSTRAINT "PK_PRICES_CANDIDATES_INT"
+    PRIMARY KEY ("CANDIDATE_ID");
+ALTER TABLE "PRICES_CANDIDATES" ADD CONSTRAINT "UQ_PRICES_CANDIDATES_CONTENT_HASH"
+    UNIQUE ("CONTENT_HASH");
+-- Optional referential metadata (not enforced in Snowflake standard tables):
+ALTER TABLE "PRICES" ADD CONSTRAINT "FK_PRICES_CANDIDATE_INT"
+    FOREIGN KEY ("CANDIDATE_ID") REFERENCES "PRICES_CANDIDATES"("CANDIDATE_ID");
+
+-- G. FIRST NEXTVAL IS MAX(INTEGER_ID)+1 (or 1 for an empty table).
+-- Never CREATE OR REPLACE the sequence afterward, or IDs may be reused.
+EXECUTE IMMEDIATE $$
+DECLARE
+  next_id NUMBER(38,0);
+BEGIN
+  SELECT COALESCE(MAX("CANDIDATE_ID"), 0) + 1 INTO :next_id
+  FROM "PRICES_CANDIDATES";
+  EXECUTE IMMEDIATE
+    'CREATE SEQUENCE "PRICES_CANDIDATES_ID_SEQ" START WITH '
+    || TO_VARCHAR(next_id) || ' INCREMENT BY 1 ORDER';
+END;
+$$;
+
+-- H. FINAL CHECK (does not consume a sequence value).
+SELECT COUNT(*) AS candidate_rows, MIN("CANDIDATE_ID") AS min_id,
+       MAX("CANDIDATE_ID") AS max_id,
+       COUNT(DISTINCT "CONTENT_HASH") AS unique_hashes
+FROM "PRICES_CANDIDATES";
+
+SELECT p."SYMBOL", TO_DATE(p."DATE") AS day, p."CANDIDATE_ID",
+       c."CONTENT_HASH", c."VALIDATION_STATUS", c."VOLUME"
+FROM "PRICES" p
+JOIN "PRICES_CANDIDATES" c ON p."CANDIDATE_ID" = c."CANDIDATE_ID"
+WHERE p."SYMBOL" IN ('PZU.WA','ALE.WA')
+ORDER BY day DESC, p."SYMBOL" LIMIT 20;
+
+-- Do NOT delete the backup clones or LEGACY_CANDIDATE_HASH yet.
+-- Once validated, deploy the accompanying Python files and run make test,
+-- then re-run a short ingestion. Running schema.prepare_tables() creates the
+-- sequence only on fresh installations; it never restarts this sequence.
