@@ -88,8 +88,6 @@ BASE_COLUMNS: dict[str, dict[str, str]] = {
     },
 }
 
-# Authoritative fixed-point types for all new observations. Legacy prices are
-# kept untouched so no existing data is rounded implicitly by this update.
 NEW_COLUMNS: dict[str, dict[str, str]] = {
     "providers": {
         "provider_id": "BIGINT PRIMARY KEY",
@@ -132,12 +130,16 @@ NEW_COLUMNS: dict[str, dict[str, str]] = {
 
 
 def _type(sql: str, backend: Backend) -> str:
+    """Translate SQL *type tokens*, not substrings in default expressions."""
     if backend == "snowflake":
-        return (
-            sql.replace("BIGINT", "NUMBER(38,0)")
-            .replace("DECIMAL(", "NUMBER(")
-            .replace("TIMESTAMP", "TIMESTAMP_NTZ")
-        )
+        import re
+
+        sql = re.sub(r"\bBIGINT\b", "NUMBER(38,0)", sql)
+        sql = re.sub(r"\bDECIMAL\(", "NUMBER(", sql)
+        sql = re.sub(r"\bTIMESTAMP\b(?!\s*\()", "TIMESTAMP_NTZ", sql, count=1)
+        # The single TIMESTAMP token is always the leading column type in
+        # our declarations. CURRENT_TIMESTAMP must stay a valid SQL function.
+        return sql
     return sql
 
 
@@ -159,37 +161,47 @@ def _fetch(conn: Any, sql: str) -> list[tuple[Any, ...]]:
 
 
 def prepare_tables(connection: Any, *, backend: Backend) -> None:
-    """Create all 11 tables; extend only new columns on existing tables.
-
-    This is the single schema entry point for both repository implementations.
-    Stops on ambiguous SECURITY IDs before creating foreign-key references.
-    """
+    """Create all 11 tables; extend only new columns on existing tables."""
     if backend not in ("duckdb", "snowflake"):
         raise ValueError(f"Unknown backend: {backend}")
-    # On a fresh instance the entire base schema comes from this declaration.
     for table, columns in BASE_COLUMNS.items():
         fields = ", ".join(f'"{k.upper()}" {_type(v, backend)}' for k, v in columns.items())
         _execute(connection, f'CREATE TABLE IF NOT EXISTS "{table.upper()}" ({fields})')
-    # Existing deployments: add the new columns without changing old data.
+    # Explicitly inspect existing columns. Snowflake can reject
+    # ALTER TABLE ... ADD COLUMN IF NOT EXISTS for an existing column with
+    # SQL compilation error "ambiguous column name"; skip the DDL instead.
     for table in ("securities", "prices"):
         added = (
             ("is_active",)
             if table == "securities"
             else ("asset_id", "provider_id", "candidate_id", "selected_at", "selection_reason")
         )
-        for field in added:
-            _execute(
-                connection,
-                f'ALTER TABLE "{table.upper()}" ADD COLUMN IF NOT EXISTS "{field.upper()}" {_type(BASE_COLUMNS[table][field], backend)}',
+        if backend == "snowflake":
+            columns_sql = (
+                'SELECT "COLUMN_NAME" FROM INFORMATION_SCHEMA.COLUMNS '
+                f"WHERE TABLE_CATALOG = CURRENT_DATABASE() AND "
+                f"TABLE_SCHEMA = CURRENT_SCHEMA() AND TABLE_NAME = '{table.upper()}'"
             )
+        else:
+            columns_sql = (
+                "SELECT column_name FROM information_schema.columns "
+                f"WHERE lower(table_name) = '{table}' "
+                "AND table_schema = current_schema()"
+            )
+        existing = {str(row[0]).upper() for row in _fetch(connection, columns_sql)}
+        for field in added:
+            if field.upper() not in existing:
+                _execute(
+                    connection,
+                    f'ALTER TABLE "{table.upper()}" ADD COLUMN "{field.upper()}" '
+                    f"{_type(BASE_COLUMNS[table][field], backend)}",
+                )
     conflicts = _fetch(
         connection,
         'SELECT "ASSET_ID", COUNT(*) FROM "SECURITIES" GROUP BY "ASSET_ID" HAVING "ASSET_ID" IS NULL OR COUNT(*) > 1 LIMIT 5',
     )
     if conflicts:
         raise ValueError(f"SECURITIES.ASSET_ID must be non-null and unique: {conflicts!r}")
-    # DuckDB enforces FKs only when a referenced PK exists. Snowflake standard
-    # PK/FK metadata is informational, so logical checks remain necessary.
     if backend == "duckdb":
         rows = _fetch(
             connection,
@@ -228,7 +240,6 @@ def prepare_tables(connection: Any, *, backend: Backend) -> None:
             if backend == "duckdb" or not c.startswith("CHECK")
         )
         _execute(connection, f'CREATE TABLE IF NOT EXISTS "{table.upper()}" ({", ".join(fields)})')
-    # Populate only demonstrably unambiguous legacy mappings; never guess.
     _execute(
         connection,
         """UPDATE "PRICES" p SET "ASSET_ID" = (
