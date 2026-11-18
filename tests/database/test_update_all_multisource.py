@@ -1,4 +1,4 @@
-"""Offline unit and orchestration tests for update_all GPW worker routing."""
+"""Offline unit and orchestration tests for candidate pipeline routing in update_all."""
 
 from __future__ import annotations
 
@@ -39,7 +39,33 @@ def test_gpw_routes_to_multi_provider_using_existing_window_and_batch() -> None:
     assert "--all-mapped" not in update_all.command_for_job(data)
 
 
-@pytest.mark.parametrize("dataset", ["FX-YAHOO", "WIG20", "DERIVATIVES", "US", "RATES", "FW20"])
+@pytest.mark.parametrize(
+    ("dataset", "symbols", "market_dataset"),
+    [
+        ("WIG20", ("WIG20",), "INDEX"),
+        ("DERIVATIVES", ("FW20Z2620", "OW20_TEST"), "DERIVATIVE"),
+    ],
+)
+def test_index_and_derivatives_route_to_candidate_pipeline(
+    dataset: str, symbols: tuple[str, ...], market_dataset: str
+) -> None:
+    data = job(dataset, symbols)
+    assert update_all.command_for_job(data) == (
+        sys.executable,
+        "-m",
+        "run.ingest_market_prices",
+        "--dataset",
+        market_dataset,
+        "--symbols",
+        *symbols,
+        "--start",
+        "2026-11-16",
+        "--end",
+        "2026-11-17",
+    )
+
+
+@pytest.mark.parametrize("dataset", ["FX-YAHOO", "US", "RATES", "FW20"])
 def test_other_datasets_keep_existing_worker(dataset: str) -> None:
     data = job(dataset)
     assert update_all.command_for_job(data) == data.argv
@@ -81,6 +107,50 @@ def test_update_all_write_invokes_multi_source_and_preserves_other_workers(monke
     assert calls[0][-1] == "--write"
     assert calls[1][2] == "run.backfill_equities"  # unchanged test fixture argv
     assert calls[1][-1] == "--write"
+
+
+def test_update_all_write_invokes_index_and_derivative_candidate_workers(monkeypatch) -> None:
+    import config.config
+    import database.repositories.factory
+
+    class DummyRepo:
+        connection = object()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    monkeypatch.setattr(
+        config.config, "load_config", lambda _filename: {"database": {"driver": "snowflake"}}
+    )
+    monkeypatch.setattr(
+        database.repositories.factory, "repository_from_config", lambda _config: DummyRepo()
+    )
+    monkeypatch.setattr(update_all, "yesterday_warsaw", lambda: date(2026, 11, 18))
+    monkeypatch.setattr(update_all, "fetch_inventory", lambda _con, dataset: [dataset])
+    monkeypatch.setattr(
+        update_all,
+        "build_plan",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            jobs=[job("WIG20", ("WIG20",)), job("DERIVATIVES", ("FW20Z2620",))],
+            skipped=[],
+            target=date(2026, 11, 17),
+        ),
+    )
+    calls: list[list[str]] = []
+    monkeypatch.setattr(update_all.subprocess, "call", lambda cmd: calls.append(cmd) or 0)
+    assert (
+        update_all.main(
+            ["--datasets", "WIG20", "DERIVATIVES", "--write", "--through", "2026-11-17"]
+        )
+        == 0
+    )
+    assert len(calls) == 2
+    assert [call[2] for call in calls] == ["run.ingest_market_prices"] * 2
+    assert [call[4] for call in calls] == ["INDEX", "DERIVATIVE"]
+    assert all(call[-1] == "--write" for call in calls)
 
 
 def test_update_all_plan_only_does_not_execute(monkeypatch) -> None:

@@ -1,13 +1,9 @@
-"""Refresh Ikaros datasets from their last stored date through yesterday.
+"""Refresh datasets through yesterday, using candidate pipelines for GPW/index/derivatives.
 
-GPW equities use the validated multi-provider PRICES_CANDIDATES -> PRICES
-pipeline. Other datasets retain their existing workers. This wrapper never
-fetches raw prices directly.
+    uv run --extra snowflake python -m run.update_all --datasets WIG20 DERIVATIVES --write
 
-Examples (PowerShell, from project root):
-  uv run --extra snowflake python -m run.update_all
-  uv run --extra snowflake python -m run.update_all --datasets GPW --write
-  uv run --extra snowflake python -m run.update_all --write
+Plan-only by default. The legacy FW20 option still invokes its older worker;
+DERIVATIVES is the supported multi-provider route for contract prices.
 """
 
 from __future__ import annotations
@@ -24,25 +20,34 @@ LOG = logging.getLogger("ikaros.update")
 
 
 def command_for_job(job: Job) -> tuple[str, ...]:
-    """Select the authoritative GPW writer without changing other workers.
-
-    The incremental planner still determines symbols and date windows. This
-    routing keeps its pre-existing grouping and filtering, but ensures GPW
-    always stages and validates provider candidates before updating PRICES.
-    """
-    if job.dataset != "GPW":
-        return job.argv
-    return (
-        sys.executable,
-        "-m",
-        "run.ingest_gpw_prices",
-        "--symbols",
-        *job.symbols,
-        "--start",
-        job.start.isoformat(),
-        "--end",
-        job.end.isoformat(),
-    )
+    """Route only migrated datasets; preserve the existing incremental planner."""
+    if job.dataset == "GPW":
+        return (
+            sys.executable,
+            "-m",
+            "run.ingest_gpw_prices",
+            "--symbols",
+            *job.symbols,
+            "--start",
+            job.start.isoformat(),
+            "--end",
+            job.end.isoformat(),
+        )
+    if job.dataset in ("WIG20", "DERIVATIVES"):
+        return (
+            sys.executable,
+            "-m",
+            "run.ingest_market_prices",
+            "--dataset",
+            "INDEX" if job.dataset == "WIG20" else "DERIVATIVE",
+            "--symbols",
+            *job.symbols,
+            "--start",
+            job.start.isoformat(),
+            "--end",
+            job.end.isoformat(),
+        )
+    return job.argv
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -53,17 +58,9 @@ def main(argv: list[str] | None = None) -> int:
         "--through", type=date.fromisoformat, help="Override Warsaw yesterday for a replay"
     )
     parser.add_argument(
-        "--overlap-days",
-        type=int,
-        default=2,
-        help="Recheck this many days before latest; insert-only sources preserve rows",
+        "--overlap-days", type=int, default=2, help="Recheck this many days before latest"
     )
-    parser.add_argument(
-        "--max-gap-days",
-        type=int,
-        default=90,
-        help="Skip very stale symbols: use explicit historical backfill",
-    )
+    parser.add_argument("--max-gap-days", type=int, default=90, help="Skip very stale symbols")
     parser.add_argument(
         "--bootstrap-start",
         type=date.fromisoformat,
