@@ -1,103 +1,16 @@
-"""Cloud persistence matching Ikaros' current DuckDB Repository API.
-
-Adapted from Daedalus' Snowflake connector design. Uses a persistent shared
-schema, not a per-simulation schema. Credentials are read from environment.
-
-This first-stage adapter preserves the existing append-only semantics; MERGE,
-checkpointing, and ingestion metadata belong in the next reliability phase.
-"""
+"""Snowflake storage. Schema creation is delegated to database.schema."""
 
 from __future__ import annotations
-
 import os
 import re
 from datetime import date
 from typing import Any
-
 import pandas as pd
 import snowflake.connector
-
 from snowflake.connector.pandas_tools import write_pandas
+from database.schema import BASE_COLUMNS, NEW_COLUMNS, prepare_tables as create_all_tables
 
-# Optional dependency: importing the local factory does not require Snowflake.
-
-COLUMNS: dict[str, dict[str, str]] = {
-    "calendars": {
-        "calendar_id": "NUMBER(38,0)",
-        "name": "VARCHAR",
-        "days_per_year": "NUMBER(38,0)",
-        "init_date": "TIMESTAMP_NTZ",
-        "working_days": "VARCHAR",
-        "comment": "VARCHAR",
-    },
-    "trading_days": {
-        "date": "TIMESTAMP_NTZ",
-        "calendar_id": "NUMBER(38,0)",
-        "comment": "VARCHAR",
-        "load_status": "VARCHAR",
-        "load_date": "TIMESTAMP_NTZ",
-    },
-    "non_trading_days": {
-        "date": "TIMESTAMP_NTZ",
-        "calendar_id": "NUMBER(38,0)",
-        "comment": "VARCHAR",
-    },
-    "securities": {
-        "asset_id": "NUMBER(38,0)",
-        "instrument_class": "VARCHAR",
-        "market_type": "VARCHAR",
-        "name": "VARCHAR",
-        "reference_price": "FLOAT",
-        "symbol": "VARCHAR",
-        "currency": "VARCHAR",
-        "calendar_id": "NUMBER(38,0)",
-        "init_date": "TIMESTAMP_NTZ",
-        "venue": "VARCHAR",
-    },
-    "prices": {
-        "symbol": "VARCHAR",
-        "date": "TIMESTAMP_NTZ",
-        "open": "FLOAT",
-        "high": "FLOAT",
-        "low": "FLOAT",
-        "close": "FLOAT",
-        "volume": "FLOAT",
-        "dividend": "FLOAT",
-        "split_ratio": "FLOAT",
-    },
-    "currencies": {
-        "currency_id": "NUMBER(38,0)",
-        "symbol": "VARCHAR",
-        "calendar_id": "NUMBER(38,0)",
-        "name": "VARCHAR",
-        "comment": "VARCHAR",
-        "code": "VARCHAR",
-        "minor_unit": "NUMBER(38,0)",
-        "is_active": "BOOLEAN",
-        "created_at": "TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()",
-    },
-    "currency_pairs": {
-        "currency_pair_id": "NUMBER(38,0)",
-        "base_currency_id": "NUMBER(38,0)",
-        "quote_currency_id": "NUMBER(38,0)",
-        "symbol": "VARCHAR",
-        "is_active": "BOOLEAN",
-        "created_at": "TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()",
-    },
-    "fx_rates": {
-        "currency_pair_id": "NUMBER(38,0)",
-        "symbol": "VARCHAR",
-        "date": "TIMESTAMP_NTZ",
-        "open": "FLOAT",
-        "high": "FLOAT",
-        "low": "FLOAT",
-        "close": "FLOAT",
-        "volume": "FLOAT",
-        "comment": "VARCHAR",
-        "ingested_at": "TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()",
-    },
-}
-
+COLUMNS = {**BASE_COLUMNS, **NEW_COLUMNS}
 WRITE_COLUMNS = {
     "calendars": ["calendar_id", "name", "days_per_year", "init_date", "working_days", "comment"],
     "trading_days": ["date", "calendar_id", "comment", "load_status", "load_date"],
@@ -143,14 +56,13 @@ WRITE_COLUMNS = {
     ],
     "fx_rates": ["currency_pair_id", "symbol", "date", "open", "high", "low", "close", "volume"],
 }
-
 _VALID_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 
-def _ident(s: str) -> str:
-    if not _VALID_IDENTIFIER.fullmatch(s):
-        raise ValueError(f"Invalid SQL identifier: {s!r}")
-    return s.upper()
+def _ident(value: str) -> str:
+    if not _VALID_IDENTIFIER.fullmatch(value):
+        raise ValueError(f"Invalid SQL identifier: {value!r}")
+    return value.upper()
 
 
 class SnowflakeRepository:
@@ -198,18 +110,15 @@ class SnowflakeRepository:
         with self.connection.cursor() as cur:
             cur.execute(sql, params)
             frame = cur.fetch_pandas_all()
-            frame.columns = [str(column).lower() for column in frame.columns]
-            return frame
+        frame.columns = [str(column).lower() for column in frame.columns]
+        return frame
 
     def prepare_tables(self) -> None:
-        for table, columns in COLUMNS.items():
-            definition = ", ".join(f'"{_ident(k)}" {typ}' for k, typ in columns.items())
-            self._execute(f'CREATE TABLE IF NOT EXISTS "{_ident(table)}" ({definition})')
+        create_all_tables(self.connection, backend="snowflake")
 
     def _insert_frame(self, table: str, df: pd.DataFrame) -> None:
         if df.empty:
             return
-
         fields = WRITE_COLUMNS[table]
         absent = set(fields) - set(df.columns)
         if absent:
@@ -219,7 +128,6 @@ class SnowflakeRepository:
         for field in fields:
             if field in ("date", "init_date", "load_date"):
                 frame[field.upper()] = pd.to_datetime(frame[field.upper()], errors="coerce")
-        # Arrow-backed write_pandas requires consistent datatypes and column casing.
         success, _chunks, count, _output = write_pandas(
             self.connection,
             frame,
@@ -255,18 +163,12 @@ class SnowflakeRepository:
         self._insert_frame("prices", prices_df)
 
     def save_fx_rates(self, fx_rates_df: pd.DataFrame) -> None:
-        """Write daily FX dates through explicit Snowflake text-to-timestamp conversion.
-
-        Avoid Parquet/Pandas timestamp inference used by write_pandas for FX dates.
-        This remains append-only; existing malformed rows are not altered.
-        """
         if fx_rates_df.empty:
             return
         fields = WRITE_COLUMNS["fx_rates"]
         absent = set(fields) - set(fx_rates_df.columns)
         if absent:
             raise ValueError(f"fx_rates: missing columns {sorted(absent)}")
-
         prepared = fx_rates_df[fields].copy()
         dates = pd.to_datetime(prepared["date"], errors="raise")
         if dates.isna().any():
@@ -275,9 +177,9 @@ class SnowflakeRepository:
         prepared = prepared.astype(object).where(pd.notna(prepared), None)
         rows = list(prepared.itertuples(index=False, name=None))
         sql = (
-            'INSERT INTO "FX_RATES" '
-            '("CURRENCY_PAIR_ID", "SYMBOL", "DATE", "OPEN", "HIGH", "LOW", "CLOSE", "VOLUME") '
-            "VALUES (%s, %s, TO_TIMESTAMP_NTZ(%s, 'YYYY-MM-DD'), %s, %s, %s, %s, %s)"
+            'INSERT INTO "FX_RATES" ("CURRENCY_PAIR_ID", "SYMBOL", "DATE", '
+            '"OPEN", "HIGH", "LOW", "CLOSE", "VOLUME") VALUES '
+            "(%s, %s, TO_TIMESTAMP_NTZ(%s, 'YYYY-MM-DD'), %s, %s, %s, %s, %s)"
         )
         with self.connection.cursor() as cur:
             try:
@@ -289,30 +191,25 @@ class SnowflakeRepository:
                 raise
 
     def get_calendar(self, calendar_id: int) -> pd.DataFrame:
-        return self._query(
-            sql='SELECT * FROM "CALENDARS" WHERE "CALENDAR_ID" = %s', params=(calendar_id,)
-        )
+        return self._query('SELECT * FROM "CALENDARS" WHERE "CALENDAR_ID"=%s', (calendar_id,))
 
     def get_trading_days(self, calendar_id: int, year: int) -> pd.DataFrame:
         start, end = date(year, 1, 1), date(year + 1, 1, 1)
         return self._query(
-            sql='SELECT * FROM "TRADING_DAYS" WHERE "CALENDAR_ID" = %s '
-            'AND "DATE" >= %s AND "DATE" < %s ORDER BY "DATE"',
-            params=(calendar_id, start, end),
+            'SELECT * FROM "TRADING_DAYS" WHERE "CALENDAR_ID"=%s AND "DATE">=%s AND "DATE"<%s ORDER BY "DATE"',
+            (calendar_id, start, end),
         )
 
     def get_securities(self, venue: str | None = None) -> pd.DataFrame:
         if venue is None:
             return self._query('SELECT * FROM "SECURITIES"')
-        return self._query(sql='SELECT * FROM "SECURITIES" WHERE "VENUE" = %s', params=(venue,))
+        return self._query('SELECT * FROM "SECURITIES" WHERE "VENUE"=%s', (venue,))
 
     def get_currencies(self) -> pd.DataFrame:
         return self._query('SELECT * FROM "CURRENCIES"')
 
     def get_currency_pairs(self) -> pd.DataFrame:
-        return self._query(
-            sql='SELECT * FROM "CURRENCY_PAIRS" WHERE "IS_ACTIVE" = %s', params=(True,)
-        )
+        return self._query('SELECT * FROM "CURRENCY_PAIRS" WHERE "IS_ACTIVE"=%s', (True,))
 
     def close(self) -> None:
         self.connection.close()
@@ -320,5 +217,5 @@ class SnowflakeRepository:
     def __enter__(self) -> SnowflakeRepository:
         return self
 
-    def __exit__(self, *_args) -> None:
+    def __exit__(self, *_args: object) -> None:
         self.close()
