@@ -1,11 +1,13 @@
 """Refresh Ikaros datasets from their last stored date through yesterday.
 
+GPW equities use the validated multi-provider PRICES_CANDIDATES -> PRICES
+pipeline. Other datasets retain their existing workers. This wrapper never
+fetches raw prices directly.
+
 Examples (PowerShell, from project root):
   uv run --extra snowflake python -m run.update_all
+  uv run --extra snowflake python -m run.update_all --datasets GPW --write
   uv run --extra snowflake python -m run.update_all --write
-  uv run --extra snowflake python -m run.update_all --datasets FX WIG20 --write
-
-Uses existing provider commands; does not start Kafka or mutate references.
 """
 
 from __future__ import annotations
@@ -13,11 +15,34 @@ from __future__ import annotations
 import argparse
 import logging
 import subprocess
+import sys
 from datetime import date
 
-from ikaros_app.update import DATASETS, build_plan, fetch_inventory, yesterday_warsaw
+from ikaros_app.update import DATASETS, Job, build_plan, fetch_inventory, yesterday_warsaw
 
 LOG = logging.getLogger("ikaros.update")
+
+
+def command_for_job(job: Job) -> tuple[str, ...]:
+    """Select the authoritative GPW writer without changing other workers.
+
+    The incremental planner still determines symbols and date windows. This
+    routing keeps its pre-existing grouping and filtering, but ensures GPW
+    always stages and validates provider candidates before updating PRICES.
+    """
+    if job.dataset != "GPW":
+        return job.argv
+    return (
+        sys.executable,
+        "-m",
+        "run.ingest_gpw_prices",
+        "--symbols",
+        *job.symbols,
+        "--start",
+        job.start.isoformat(),
+        "--end",
+        job.end.isoformat(),
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -85,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
         LOG.warning("SKIP %s", line)
     failures = 0
     for number, job in enumerate(plan.jobs, 1):
-        cmd = list(job.argv) + (["--write"] if args.write else [])
+        cmd = list(command_for_job(job)) + (["--write"] if args.write else [])
         LOG.info(
             "[%d/%d] %s symbols=%d %s..%s %s",
             number,
