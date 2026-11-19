@@ -12,6 +12,16 @@ from ikaros_app.update import Job
 from run import update_all
 
 
+@pytest.fixture(autouse=True)
+def _isolate_gap_scanner(monkeypatch) -> None:
+    # These tests isolate routing; real SQL-backed gap behavior is tested in
+    # test_gap_repair.py. Avoid opening a database in synthetic planner stubs.
+    import ikaros_app.gap_repair as repair
+
+    monkeypatch.setattr(repair, "gap_repair_jobs", lambda *_a, **_kw: ([], {}))
+    monkeypatch.setattr(repair, "missing_sessions", lambda *_a, **_kw: {})
+
+
 def job(dataset: str, symbols: tuple[str, ...] = ("PZU.WA",)) -> Job:
     return Job(
         dataset=dataset,
@@ -44,6 +54,7 @@ def test_gpw_routes_to_multi_provider_using_existing_window_and_batch() -> None:
     [
         ("WIG20", ("WIG20",), "INDEX"),
         ("DERIVATIVES", ("FW20Z2620", "OW20_TEST"), "DERIVATIVE"),
+        ("FW20", ("FW20Z2620",), "DERIVATIVE"),
     ],
 )
 def test_index_and_derivatives_route_to_candidate_pipeline(
@@ -65,7 +76,7 @@ def test_index_and_derivatives_route_to_candidate_pipeline(
     )
 
 
-@pytest.mark.parametrize("dataset", ["FX-YAHOO", "US", "RATES", "FW20"])
+@pytest.mark.parametrize("dataset", ["FX-YAHOO", "US", "RATES"])
 def test_other_datasets_keep_existing_worker(dataset: str) -> None:
     data = job(dataset)
     assert update_all.command_for_job(data) == data.argv
@@ -91,7 +102,11 @@ def test_update_all_write_invokes_multi_source_and_preserves_other_workers(monke
         database.repositories.factory, "repository_from_config", lambda _config: DummyRepo()
     )
     monkeypatch.setattr(update_all, "yesterday_warsaw", lambda: date(2026, 11, 18))
-    monkeypatch.setattr(update_all, "fetch_inventory", lambda _con, dataset: [dataset])
+    monkeypatch.setattr(
+        update_all,
+        "fetch_inventory",
+        lambda _con, dataset: [SimpleNamespace(symbol=dataset, expiry=None)],
+    )
     monkeypatch.setattr(
         update_all,
         "build_plan",
@@ -129,7 +144,11 @@ def test_update_all_write_invokes_index_and_derivative_candidate_workers(monkeyp
         database.repositories.factory, "repository_from_config", lambda _config: DummyRepo()
     )
     monkeypatch.setattr(update_all, "yesterday_warsaw", lambda: date(2026, 11, 18))
-    monkeypatch.setattr(update_all, "fetch_inventory", lambda _con, dataset: [dataset])
+    monkeypatch.setattr(
+        update_all,
+        "fetch_inventory",
+        lambda _con, dataset: [SimpleNamespace(symbol=dataset, expiry=None)],
+    )
     monkeypatch.setattr(
         update_all,
         "build_plan",
@@ -173,7 +192,11 @@ def test_update_all_plan_only_does_not_execute(monkeypatch) -> None:
         database.repositories.factory, "repository_from_config", lambda _config: DummyRepo()
     )
     monkeypatch.setattr(update_all, "yesterday_warsaw", lambda: date(2026, 11, 18))
-    monkeypatch.setattr(update_all, "fetch_inventory", lambda _con, dataset: [dataset])
+    monkeypatch.setattr(
+        update_all,
+        "fetch_inventory",
+        lambda _con, dataset: [SimpleNamespace(symbol=dataset, expiry=None)],
+    )
     monkeypatch.setattr(
         update_all,
         "build_plan",
@@ -207,7 +230,11 @@ def test_update_all_failure_from_multi_source_is_propagated(monkeypatch) -> None
         database.repositories.factory, "repository_from_config", lambda _config: DummyRepo()
     )
     monkeypatch.setattr(update_all, "yesterday_warsaw", lambda: date(2026, 11, 18))
-    monkeypatch.setattr(update_all, "fetch_inventory", lambda _con, dataset: [dataset])
+    monkeypatch.setattr(
+        update_all,
+        "fetch_inventory",
+        lambda _con, dataset: [SimpleNamespace(symbol=dataset, expiry=None)],
+    )
     monkeypatch.setattr(
         update_all,
         "build_plan",
