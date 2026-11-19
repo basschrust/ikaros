@@ -40,6 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     from config.config import load_config
     from database.repositories.factory import repository_from_config
     from database.market_quote_pipeline import run_market_job
+    from database.market_metadata import eligible_derivative_contracts
     from ingestion.market_quote_feeds import default_feeds
 
     settings = load_config("database.yaml")
@@ -52,15 +53,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.dataset == "INDEX":
             wanted = ["WIG20"]
         elif wanted is None:
-            b = "%s" if backend == "snowflake" else "?"
-            with repo.connection.cursor() as cur:
-                cur.execute(
-                    f'SELECT "CONTRACT_ID" FROM "DERIVATIVE_CONTRACTS" '
-                    f"WHERE \"INSTRUMENT_TYPE\" IN ('FUTURE','OPTION') "
-                    f'AND "EXPIRY_DATE" >= {b}',
-                    (start.isoformat(),),
-                )
-                wanted = [str(row[0]) for row in cur.fetchall()]
+            wanted = eligible_derivative_contracts(repo.connection, since=start, backend=backend)
         if not wanted:
             print("No registered contracts eligible for this date range")
             return 1

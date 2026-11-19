@@ -9,30 +9,17 @@ are intentionally excluded from automatic gap detection.
 from __future__ import annotations
 
 from collections import defaultdict
-from contextlib import closing
-from datetime import date, datetime
+from datetime import date
 from typing import Any, Sequence
+
+from database.gap_queries import session_coverage
 
 from ikaros_app.update import Job, worker
 from run.ingest_gpw_prices import last_gpw_sessions
 
 
-def _date(value: object) -> date:
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    return date.fromisoformat(str(value)[:10])
-
-
 def _chunks(items: Sequence[str], size: int) -> list[tuple[str, ...]]:
     return [tuple(items[i : i + size]) for i in range(0, len(items), size)]
-
-
-def _fetch(connection: Any, query: str, params: tuple[object, ...]) -> list[tuple]:
-    with closing(connection.cursor()) as cursor:
-        cursor.execute(query, params)
-        return list(cursor.fetchall())
 
 
 def missing_sessions(
@@ -63,31 +50,16 @@ def missing_sessions(
         raise ValueError("Only canonical WIG20 index is supported")
     sessions = last_gpw_sessions(through, lookback_sessions)
     first_session = sessions[0]
-    table = '"INDEX_PRICES"' if dataset == "WIG20" else '"PRICES"'
-    field = '"INDEX_SYMBOL"' if dataset == "WIG20" else '"SYMBOL"'
     gaps: dict[str, tuple[date, ...]] = {}
-    # Batch queries rather than a per-security Snowflake round-trip.
+    # Single batched query per dataset chunk; query composition stays in database/.
     for batch in _chunks(ordered, batch_size):
-        params = tuple(batch)
-        placeholders = ",".join(["%s"] * len(batch))
-        bounds = _fetch(
+        extent, recorded = session_coverage(
             connection,
-            f'SELECT {field}, MIN(CAST("DATE" AS DATE)), '
-            f'MAX(CAST("DATE" AS DATE)) FROM {table} '
-            f"WHERE {field} IN ({placeholders}) GROUP BY {field}",
-            params,
+            dataset=dataset,
+            symbols=batch,
+            start=first_session,
+            end=through,
         )
-        extent = {str(symbol): (_date(first), _date(last)) for symbol, first, last in bounds}
-        observed = _fetch(
-            connection,
-            f'SELECT {field}, CAST("DATE" AS DATE) FROM {table} '
-            f"WHERE {field} IN ({placeholders}) "
-            'AND CAST("DATE" AS DATE) BETWEEN %s AND %s',
-            (*params, first_session.isoformat(), through.isoformat()),
-        )
-        recorded: dict[str, set[date]] = defaultdict(set)
-        for symbol, day in observed:
-            recorded[str(symbol)].add(_date(day))
         for symbol in batch:
             if symbol not in extent:
                 # No history: explicit bootstrap, never infer a listing date.
@@ -98,7 +70,7 @@ def missing_sessions(
                 for session in sessions
                 if first <= session
                 and (include_trailing or session < last)
-                and session not in recorded[symbol]
+                and session not in recorded.get(symbol, set())
             )
             if missing:
                 gaps[symbol] = missing

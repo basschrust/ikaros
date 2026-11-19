@@ -1,12 +1,14 @@
 """Review discovered GPW futures and options without promoting them to contracts."""
 
 from __future__ import annotations
+
 import argparse
 import csv
-from contextlib import closing
 from datetime import date, datetime
 from pathlib import Path
+
 from config.config import load_config
+from database.catalog_queries import derivative_candidate_review_rows
 from database.repositories.factory import repository_from_config
 from ingestion.derivative_review_ext import review_candidate
 
@@ -24,7 +26,7 @@ COLUMNS = (
 )
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--as-of", type=date.fromisoformat, default=date.today())
     parser.add_argument("--out", type=Path, default=Path("output/derivatives_registry_review.csv"))
@@ -33,12 +35,7 @@ def main():
     if config.get("database", {}).get("driver", "").lower() != "snowflake":
         parser.error("Select Snowflake database driver")
     with repository_from_config(config) as repo:
-        with closing(repo.connection.cursor()) as cur:
-            cur.execute(
-                'SELECT "SYMBOL", "INSTRUMENT_TYPE", "EXPIRY_DATE" '
-                'FROM "DERIVATIVE_CANDIDATES" ORDER BY "INSTRUMENT_TYPE", "SYMBOL"'
-            )
-            records = cur.fetchall()
+        records = derivative_candidate_review_rows(repo.connection)
     results = []
     for symbol, instrument_type, expiry in records:
         if isinstance(expiry, datetime):
