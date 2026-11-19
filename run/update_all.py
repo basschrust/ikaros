@@ -1,12 +1,12 @@
-"""Refresh Ikaros data and repair historical WIG20/GPW equity session gaps.
+"""Stage all daily observations as candidates, then promote from committed rows.
 
 Examples:
   uv run --extra snowflake python -m run.update_all --datasets WIG20 --write
   uv run --extra snowflake python -m run.update_all --datasets WIG20 --repair-only --write
   uv run --extra snowflake python -m run.update_all --write
 
-GPW equities, WIG20 and derivatives use candidate pipelines. Other venues,
-FX and rates still use their existing source-specific importers.
+Every daily dataset goes through the candidate store. This updater does not
+invoke legacy direct-to-final writers; source fetch and promotion are separate.
 """
 
 from __future__ import annotations
@@ -28,35 +28,49 @@ from ikaros_app.update import (
 LOG = logging.getLogger("ikaros.update")
 
 
+def _candidate_dataset(dataset: str) -> str:
+    """Normalize planner-specific FX labels into one candidate domain."""
+    return (
+        "FX"
+        if dataset in ("FX-YAHOO", "FX-NBP")
+        else "DERIVATIVES"
+        if dataset == "FW20"
+        else dataset
+    )
+
+
 def command_for_job(job: Job) -> tuple[str, ...]:
-    """Route instrument prices through validated candidates where supported."""
-    if job.dataset == "GPW":
-        return (
-            sys.executable,
-            "-m",
-            "run.ingest_gpw_prices",
-            "--symbols",
-            *job.symbols,
-            "--start",
-            job.start.isoformat(),
-            "--end",
-            job.end.isoformat(),
-        )
-    if job.dataset in ("WIG20", "DERIVATIVES", "FW20"):
-        return (
-            sys.executable,
-            "-m",
-            "run.ingest_market_prices",
-            "--dataset",
-            "INDEX" if job.dataset == "WIG20" else "DERIVATIVE",
-            "--symbols",
-            *job.symbols,
-            "--start",
-            job.start.isoformat(),
-            "--end",
-            job.end.isoformat(),
-        )
-    return job.argv
+    """Candidate ingestion only: this worker cannot write final prices."""
+    return (
+        sys.executable,
+        "-m",
+        "run.stage_candidates",
+        "--dataset",
+        _candidate_dataset(job.dataset),
+        "--symbols",
+        *job.symbols,
+        "--start",
+        job.start.isoformat(),
+        "--end",
+        job.end.isoformat(),
+    )
+
+
+def promotion_command_for_job(job: Job) -> tuple[str, ...]:
+    """Separate subprocess which only reads stored candidates and promotes."""
+    return (
+        sys.executable,
+        "-m",
+        "run.promote_candidates",
+        "--dataset",
+        _candidate_dataset(job.dataset),
+        "--symbols",
+        *job.symbols,
+        "--start",
+        job.start.isoformat(),
+        "--end",
+        job.end.isoformat(),
+    )
 
 
 def _dedupe_jobs(jobs: list[Job]) -> list[Job]:
@@ -223,21 +237,17 @@ def main(argv: list[str] | None = None) -> int:
         len(pending_repairs),
         args.write,
     )
-    legacy = set(selected) - {"GPW", "WIG20", "DERIVATIVES", "FW20"}
-    if legacy:
-        LOG.warning(
-            "LEGACY SOURCE ROUTES (not yet candidate-based): %s. "
-            "Separate provider mappings and validation are still needed.",
-            ", ".join(sorted(legacy)),
-        )
     if plan is not None:
         for line in plan.skipped:
             LOG.warning("SKIP %s", line)
     failures = 0
+    staged_jobs: list[Job] = []
+    # Stage *all* source observations first. Independent reconciler starts only
+    # after staging has completed; no stage worker can publish final prices.
     for number, job in enumerate(jobs, 1):
         cmd = list(command_for_job(job)) + (["--write"] if args.write else [])
         LOG.info(
-            "[%d/%d] %s %s..%s symbols=%s: %s",
+            "STAGE [%d/%d] %s %s..%s symbols=%s: %s",
             number,
             len(jobs),
             job.dataset,
@@ -246,9 +256,28 @@ def main(argv: list[str] | None = None) -> int:
             ",".join(job.symbols),
             " ".join(cmd),
         )
-        if args.write and subprocess.call(cmd):
-            failures += 1
-            LOG.error("FAILED job %d", number)
+        if args.write:
+            if subprocess.call(cmd):
+                failures += 1
+                LOG.error("STAGE FAILED job %d; promotion will not run for this window", number)
+            else:
+                staged_jobs.append(job)
+    if args.write:
+        for number, job in enumerate(staged_jobs, 1):
+            cmd = list(promotion_command_for_job(job)) + ["--write"]
+            LOG.info(
+                "PROMOTE [%d/%d] %s %s..%s symbols=%s: %s",
+                number,
+                len(staged_jobs),
+                job.dataset,
+                job.start,
+                job.end,
+                ",".join(job.symbols),
+                " ".join(cmd),
+            )
+            if subprocess.call(cmd):
+                failures += 1
+                LOG.error("PROMOTION FAILED job %d", number)
     if args.write and "WIG20" in selected and not args.no_gap_repair:
         # Confirm the hole was actually filled, not just the worker's exit code.
         from ikaros_app.gap_repair import missing_sessions

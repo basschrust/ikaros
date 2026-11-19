@@ -1,8 +1,8 @@
-"""The normal update-all worker must not bypass market quote candidates."""
+"""Normal update-all stage workers must not write final prices."""
 
 from datetime import date
 from ikaros_app.update import Job
-from run.update_all import command_for_job
+from run.update_all import command_for_job, promotion_command_for_job
 
 
 def job(dataset):
@@ -15,24 +15,26 @@ def job(dataset):
     )
 
 
-def test_index_uses_candidate_ingest():
-    argv = command_for_job(job("WIG20"))
-    assert argv[2] == "run.ingest_market_prices"
-    assert argv[argv.index("--dataset") + 1] == "INDEX"
-    assert "WIG20" in argv
+def test_index_uses_candidate_stage_and_independent_promotion():
+    stage = command_for_job(job("WIG20"))
+    assert stage[2:5] == ("run.stage_candidates", "--dataset", "WIG20")
+    assert "WIG20" in stage
+    assert promotion_command_for_job(job("WIG20"))[2] == "run.promote_candidates"
 
 
-def test_derivatives_including_options_use_candidate_ingest():
-    argv = command_for_job(job("DERIVATIVES"))
-    assert argv[2] == "run.ingest_market_prices"
-    assert argv[argv.index("--dataset") + 1] == "DERIVATIVE"
-    assert "FW20Z2620" in argv
+def test_derivatives_and_options_use_candidate_stage():
+    stage = command_for_job(job("DERIVATIVES"))
+    assert stage[2:5] == ("run.stage_candidates", "--dataset", "DERIVATIVES")
+    assert "FW20Z2620" in stage
+    assert promotion_command_for_job(job("DERIVATIVES"))[2] == "run.promote_candidates"
 
 
-def test_gpw_equities_keep_existing_multisource():
-    argv = command_for_job(job("GPW"))
-    assert argv[2] == "run.ingest_gpw_prices"
+def test_gpw_equities_also_stage_only():
+    assert command_for_job(job("GPW"))[2] == "run.stage_candidates"
 
 
-def test_other_datasets_unchanged():
-    assert command_for_job(job("FX"))[-1] == "legacy"
+def test_previous_legacy_datasets_are_now_candidate_only():
+    for dataset in ("FX", "US", "RATES", "LSE", "XETRA"):
+        stage = command_for_job(job(dataset))
+        assert stage[2] == "run.stage_candidates"
+        assert promotion_command_for_job(job(dataset))[2] == "run.promote_candidates"
