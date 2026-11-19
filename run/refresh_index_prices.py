@@ -9,8 +9,8 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from contextlib import closing
 
+from database.index_queries import index_prices_table_exists
 from ingestion.index_prices_refresh import (
     SOURCE,
     aggregate_hourly_index_prices,
@@ -31,7 +31,6 @@ def main() -> None:
     import yfinance as yf
 
     now = datetime.now(ZoneInfo("Europe/Warsaw"))
-    # Today is not safe for end-of-day until data finality can be verified.
     last_complete = now.date() - timedelta(days=1)
     start = last_complete - timedelta(days=args.days - 1)
     raw = yf.download(
@@ -75,15 +74,10 @@ def main() -> None:
     if config.get("database", {}).get("driver", "").lower() != "snowflake":
         parser.error("Select Snowflake as database driver in config/database.yaml")
     with repository_from_config(config) as repo:
-        with closing(repo.connection.cursor()) as cur:
-            cur.execute(
-                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=CURRENT_SCHEMA() AND TABLE_NAME=%s",
-                ("INDEX_PRICES",),
+        if not index_prices_table_exists(repo.connection):
+            raise RuntimeError(
+                "INDEX_PRICES not found; apply existing index-prices DDL before enabling the job"
             )
-            if cur.fetchone()[0] != 1:
-                raise RuntimeError(
-                    "INDEX_PRICES not found; apply existing index-prices DDL before enabling the job"
-                )
         upsert_index_prices(repo.connection, frame, source=source)
     print(f"INDEX WIG20 merged={len(frame)}")
 

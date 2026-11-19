@@ -3,6 +3,8 @@ from datetime import date
 import pandas as pd
 import pytest
 
+from decimal import Decimal
+
 from run.backfill_fx_snowflake import normalize_batch, year_windows
 
 
@@ -50,7 +52,26 @@ def test_normalize_deduplicates_and_serializes_dates():
     )
     rows = normalize_batch(frame, 1, "EURPLN=X", date(2024, 1, 1), date(2024, 12, 31))
     assert len(rows) == 2
-    assert rows[0] == (1, "EURPLN=X", "2024-01-02", 4.1, 4.3, 4.0, 4.25, None)
+    assert rows[0] == (
+        1,
+        "EURPLN=X",
+        "2024-01-02",
+        Decimal("4.1"),
+        Decimal("4.3"),
+        Decimal("4.0"),
+        Decimal("4.25"),
+        None,
+    )
+    assert rows[1] == (
+        1,
+        "EURPLN=X",
+        "2024-01-03",
+        Decimal("4.2"),
+        Decimal("4.4"),
+        Decimal("4.1"),
+        Decimal("4.3"),
+        100,
+    )
     assert rows[1][2] == "2024-01-03"
 
 

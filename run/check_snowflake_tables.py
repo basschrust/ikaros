@@ -1,10 +1,6 @@
 """Create and verify the Ikaros Snowflake schema.
 
-Run from Ikaros repository root:
-    python -m run.check_snowflake_tables
-
-Requires SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_PASSWORD and
-    pip install -r requirements-snowflake.txt
+Run from Ikaros repository root: python -m run.check_snowflake_tables
 """
 
 from __future__ import annotations
@@ -13,6 +9,7 @@ import os
 import sys
 
 from config.config import load_config
+from database.catalog_queries import snowflake_connection_snapshot
 from database.repositories.factory import repository_from_config
 from database.snowflake_storage import COLUMNS
 
@@ -23,7 +20,6 @@ def main() -> int:
     if settings.get("driver", "duckdb").lower() != "snowflake":
         print("ERROR: config/database.yaml database.driver must be 'snowflake'", file=sys.stderr)
         return 2
-
     required = ("SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER")
     missing = [name for name in required if not os.getenv(name)]
     sf_cfg = settings.get("snowflake", {})
@@ -34,16 +30,12 @@ def main() -> int:
     if missing:
         print("ERROR: missing environment variables: " + ", ".join(missing), file=sys.stderr)
         return 2
-
-    # Constructor is responsible for CREATE SCHEMA/TABLE IF NOT EXISTS.
     repository = repository_from_config(config)
     try:
-        with repository.connection.cursor() as cursor:
-            cursor.execute("SELECT CURRENT_DATABASE(), CURRENT_SCHEMA(), CURRENT_ROLE()")
-            db, schema, role = cursor.fetchone()
-            print(f"Snowflake connected: database={db}, schema={schema}, role={role}")
-            cursor.execute(f'SHOW TABLES IN SCHEMA "{repository.database}"."{repository.schema}"')
-            names = {str(row[1]).upper() for row in cursor.fetchall()}
+        (db, schema, role), names = snowflake_connection_snapshot(
+            repository.connection, database=repository.database, schema=repository.schema
+        )
+        print(f"Snowflake connected: database={db}, schema={schema}, role={role}")
         expected = {table.upper() for table in COLUMNS}
         for table in sorted(expected):
             print(f"{'OK' if table in names else 'MISSING'}  {table}")

@@ -26,27 +26,18 @@ INTERVALS = {
 
 def registered_symbols(dataset: str) -> list[str]:
     from config.config import load_config
+    from database.catalog_queries import scheduled_symbols
     from database.repositories.factory import repository_from_config
 
-    if dataset == "GPW":
-        sql = 'SELECT DISTINCT "SYMBOL" FROM "SECURITIES" WHERE "VENUE" = %s ORDER BY "SYMBOL"'
-        params = ("GPW",)
-    else:
-        sql = 'SELECT DISTINCT "SYMBOL" FROM "CURRENCY_PAIRS" WHERE "IS_ACTIVE" = TRUE ORDER BY "SYMBOL"'
-        params = ()
-    with repository_from_config(load_config("database.yaml")) as repo:
-        with repo.connection.cursor() as cur:
-            cur.execute(sql, params)
-            return [str(r[0]) for r in cur.fetchall() if r[0]]
+    config = load_config("database.yaml")
+    backend = config.get("database", {}).get("driver", "snowflake").lower()
+    with repository_from_config(config) as repo:
+        return scheduled_symbols(repo.connection, dataset, backend=backend)
 
 
 def commands(job: str, *, fx_symbols: list[str], gpw_symbols: list[str], days: int, write: bool):
     if job == "FW20_PRICES":
-        return [
-            sys.executable,
-            "-m",
-            "run.refresh_fw20_prices",
-        ] + (["--write"] if write else [])
+        return [sys.executable, "-m", "run.refresh_fw20_prices"] + (["--write"] if write else [])
     if job == "DERIVATIVES":
         return [sys.executable, "-m", "run.kafka_discover_contracts"] + (
             ["--write"] if write else []
