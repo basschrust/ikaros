@@ -1,8 +1,9 @@
-"""Daedalus-style repository factory for Ikaros."""
+"""Repository factory with a candidate-first authoritative-write barrier."""
 
 from pathlib import Path
 from typing import Any
 from .interface import RepositoryInterface
+from database.final_write_guard import protect_repository
 
 
 def create_repository(
@@ -12,12 +13,14 @@ def create_repository(
     if driver == "duckdb":
         from database.duckdb_storage import Repository
 
-        return Repository(output_dir=output_dir)
-    if driver == "snowflake":
+        repository = Repository(output_dir=output_dir)
+    elif driver == "snowflake":
         from database.snowflake_storage import SnowflakeRepository
 
-        return SnowflakeRepository(**config)
-    raise ValueError(f"Unsupported database driver: {driver!r}")
+        repository = SnowflakeRepository(**config)
+    else:
+        raise ValueError(f"Unsupported database driver: {driver!r}")
+    return protect_repository(repository)
 
 
 def repository_from_config(config: dict[str, Any]) -> RepositoryInterface:

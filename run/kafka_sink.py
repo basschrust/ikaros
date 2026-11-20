@@ -1,12 +1,12 @@
-"""Consume inbound Kafka observations into Snowflake; commit offset after MERGE."""
+"""Consume Kafka events and commit offsets only after durable candidate staging."""
 
 from __future__ import annotations
 
 import argparse
 import logging
 import os
+from typing import Any
 from confluent_kafka import Consumer, Message
-from snowflake.connector import SnowflakeConnection
 
 from ingestion.kafka_inbound import Observation, TOPICS
 from ingestion.kafka_snowflake_sink import upsert_observation
@@ -15,21 +15,22 @@ LOG = logging.getLogger(__name__)
 
 
 def persist_and_commit(
-    consumer: Consumer, connection: SnowflakeConnection, message: Message, *, dataset: str
-):
+    consumer: Consumer, connection: Any, message: Message, *, dataset: str
+) -> Observation:
     event = Observation.deserialize(message.value())
     if event.dataset != dataset:
         raise ValueError("Message dataset does not match topic")
     if message.key() != event.key.encode("utf-8"):
         raise ValueError("Message key does not match payload")
+    # The compatibility name is retained, but this now writes candidate rows.
     upsert_observation(connection, event)
-    # Snowflake connector autocommit is enabled by default; this commit follows
-    # a successful durable MERGE. Never commit offsets on persistence failures.
+    # The cursor write was committed before acknowledging the event. A separate
+    # promotion process must subsequently publish the authoritative price.
     consumer.commit(message=message, asynchronous=False)
     return event
 
 
-def main():
+def main() -> None:
     from confluent_kafka import Consumer, KafkaException
     from config.config import load_config
     from database.repositories.factory import repository_from_config
@@ -66,10 +67,10 @@ def main():
                     raise KafkaException(msg.error())
                 event = persist_and_commit(client, repo.connection, msg, dataset=args.dataset)
                 processed += 1
-                LOG.info("COMMITTED %s close=%s", event.observation_id, event.close)
+                LOG.info("CANDIDATE STAGED %s close=%s", event.observation_id, event.close)
     finally:
         client.close()
-    LOG.info("Processed %d observations", processed)
+    LOG.info("Staged %d Kafka observations; promotion is a separate job", processed)
 
 
 if __name__ == "__main__":

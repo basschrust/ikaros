@@ -6,27 +6,6 @@ import argparse
 from pathlib import Path
 from ingestion.index_prices import read_index_csv
 
-DDL = """CREATE TABLE IF NOT EXISTS "INDEX_PRICES" (
- "INDEX_SYMBOL" VARCHAR NOT NULL,
- "DATE" DATE NOT NULL,
- "OPEN" FLOAT NOT NULL,
- "HIGH" FLOAT NOT NULL,
- "LOW" FLOAT NOT NULL,
- "CLOSE" FLOAT NOT NULL,
- "SOURCE" VARCHAR NOT NULL,
- "INGESTED_AT" TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
-)"""
-MERGE = """MERGE INTO "INDEX_PRICES" t USING
- (SELECT %s AS "INDEX_SYMBOL", TO_DATE(%s) AS "DATE", %s AS "OPEN",
-         %s AS "HIGH", %s AS "LOW", %s AS "CLOSE", %s AS "SOURCE") s
- ON t."INDEX_SYMBOL" = s."INDEX_SYMBOL" AND t."DATE" = s."DATE"
- WHEN MATCHED THEN UPDATE SET t."OPEN" = s."OPEN", t."HIGH" = s."HIGH",
-   t."LOW" = s."LOW", t."CLOSE" = s."CLOSE", t."SOURCE" = s."SOURCE",
-   t."INGESTED_AT" = CURRENT_TIMESTAMP()
- WHEN NOT MATCHED THEN INSERT
-   ("INDEX_SYMBOL", "DATE", "OPEN", "HIGH", "LOW", "CLOSE", "SOURCE")
- VALUES (s."INDEX_SYMBOL", s."DATE", s."OPEN", s."HIGH", s."LOW", s."CLOSE", s."SOURCE")"""
-
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -49,16 +28,9 @@ def main():
     if config.get("database", {}).get("driver", "").lower() != "snowflake":
         parser.error("Select database.driver: snowflake")
     with repository_from_config(config) as repo:
-        with repo.connection.cursor() as cur:
-            cur.execute(DDL)  # Snowflake DDL auto-commits: intentionally outside transaction.
-            try:
-                cur.execute("BEGIN")
-                for row in rows:
-                    cur.execute(MERGE, row)
-                cur.execute("COMMIT")
-            except Exception:
-                cur.execute("ROLLBACK")
-                raise
+        from database.isolated.run_ingest_index_prices import _inline_main_52
+
+        _inline_main_52(repo, rows)
     print(f"Upserted {len(rows)} index quotations into INDEX_PRICES")
 
 
