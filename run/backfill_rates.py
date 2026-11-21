@@ -1,6 +1,7 @@
-"""Official rate histories including Swiss Confederation fitted spot yields.
+"""Official rate histories and provider catalog, usable without Snowflake imports.
 
-Dry-run by default; --write persists to existing Ikaros RATE tables.
+The daily updater stages candidates via `ingestion.candidate_stage_job`; this
+legacy direct-to-final write entrypoint is blocked by candidate guard.
 """
 
 from __future__ import annotations
@@ -8,11 +9,10 @@ from __future__ import annotations
 import argparse
 from datetime import date
 import logging
+from typing import Any
 
 import requests
-from snowflake.connector import SnowflakeConnection
 from ikaros_app.rates import RateSeries, RateObservation
-
 from config.config import load_config
 from database.repositories.factory import repository_from_config
 from ikaros_app.operations import load_environment
@@ -28,25 +28,21 @@ from ikaros_app.rates_international import (
     SNBPolicyProvider,
     configured_series as international_series,
 )
-
 from ikaros_app.rates_central_europe import (
     NBPPolicyProvider,
     CNBPolicyProvider,
     MNBPolicyProvider,
     configured_series as central_europe_series,
 )
-
 from ikaros_app.rates_government import (
     BoEGiltYieldProvider,
     EurostatGovYieldProvider,
     configured_series as government_series,
 )
-
 from ikaros_app.rates_swiss_government import (
     SNBGovernmentYieldProvider,
     configured_series as swiss_government_series,
 )
-
 from ikaros_app.rates_us_extended import (
     TreasuryRealYieldProvider,
     TreasuryBillYieldProvider,
@@ -70,17 +66,16 @@ SCHEMA_DDL = (
 
 
 def persist(
-    connection: SnowflakeConnection,
+    connection: Any,
     series: dict[str, RateSeries],
     observations: list[RateObservation],
 ) -> int:
-    """Idempotent batch insertion; refuse conflicting references or source overwrite."""
+    """Legacy write path; candidate guard blocks final table DML."""
     if not observations:
         return 0
     with connection.cursor() as cur:
         for ddl in SCHEMA_DDL:
             cur.execute(ddl)
-        # Existing Snowflake tables require explicit additive schema evolution.
         cur.execute('ALTER TABLE "RATE_OBSERVATIONS" ADD COLUMN IF NOT EXISTS "BID" FLOAT')
         cur.execute('ALTER TABLE "RATE_OBSERVATIONS" ADD COLUMN IF NOT EXISTS "ASK" FLOAT')
         cur.execute("""CREATE TEMP TABLE IF NOT EXISTS "IKAROS_RATE_STAGE" (
@@ -134,7 +129,7 @@ def persist(
             )
             cur.execute("""SELECT COUNT(*) FROM "IKAROS_RATE_STAGE" s
                 JOIN "RATE_OBSERVATIONS" t ON t."SERIES_ID"=s."SERIES_ID"
-                   AND t."DATE"=s."DATE"
+                AND t."DATE"=s."DATE"
                 WHERE t."SOURCE"<>s."SOURCE" OR t."SOURCE" IS NULL""")
             if cur.fetchone()[0]:
                 raise ValueError("Conflicting rate observation source; refusing overwrite")
@@ -155,7 +150,7 @@ def persist(
 def select_series(
     series_ids: list[str] | None,
 ) -> tuple[dict[str, RateSeries], set[str]]:
-    """Combine both catalogs while keeping the legacy rates module unchanged."""
+    """Combine catalogs while refusing collisions and unknown series."""
     existing, _ = selected_sources(None)
     extended = international_series()
     overlap = set(existing) & set(extended)
@@ -193,7 +188,7 @@ def main() -> None:
     p.add_argument("--start", type=date.fromisoformat, required=True)
     p.add_argument("--end", type=date.fromisoformat, required=True)
     p.add_argument("--series", nargs="+", help="Subset of configured rate-series IDs")
-    p.add_argument("--write", action="store_true", help="Upsert official observations in Snowflake")
+    p.add_argument("--write", action="store_true", help="Legacy direct final-table write")
     args = p.parse_args()
     if args.start > args.end:
         p.error("--start must not follow --end")
@@ -237,7 +232,7 @@ def main() -> None:
     load_environment()
     config = load_config("database.yaml")
     if config.get("database", {}).get("driver", "").lower() != "snowflake":
-        p.error("Select Snowflake in config/database.yaml")
+        p.error("Legacy direct writer requires Snowflake; use run.stage_candidates for local mode")
     with repository_from_config(config) as repo:
         count = persist(repo.connection, selected, all_observations)
     LOG.info("MERGED %d rate observations", count)

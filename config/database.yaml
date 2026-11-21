@@ -1,32 +1,12 @@
+# Use IKAROS_DB_DRIVER in .env to override the default backend.
+# When DuckDB is selected, IKAROS_MARKET_DATA_DIR identifies the directory
+# holding ikaros.duckdb (it can point to Daedalus/input/market_data).
 database:
-  driver: snowflake
+  driver: duckdb
+  duckdb: {}
   snowflake:
     database: DAEDALUS
     schema: MARKET_DATA
     warehouse: DAEDALUS_WH
     authenticator: snowflake
-
-
-#database:
-#  driver: snowflake  # or duckdb
-#
-#  duckdb:
-#    output_dir: output
-#
-#  snowflake:
-#    database: DAEDALUS
-#    schema: MARKET_DATA
-#    warehouse: DAEDALUS_WH
-
-
-#database:
-#  driver: duckdb  # Change to snowflake for cloud persistence.
-#  duckdb:
-#    output_dir: output
-#  snowflake:
-#    database: DAEDALUS
-#    schema: MARKET_DATA  # Shared across ingestion runs.
-#    warehouse: DAEDALUS_WH
-#    authenticator: snowflake
-#    # role: DATA_ENGINEER
-## Set SNOWFLAKE_ACCOUNT / SNOWFLAKE_USER / SNOWFLAKE_PASSWORD via environment.
+    # Never put passwords, TOTP codes, or private keys in this YAML.

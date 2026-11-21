@@ -1,7 +1,4 @@
-"""Plan incremental Snowflake market-data refreshes, without Kafka.
-
-Latest-date catch-up; does not repair historical interior gaps.
-"""
+"""Plan incremental Ikaros updates for Snowflake and DuckDB, without Kafka."""
 
 from __future__ import annotations
 
@@ -10,8 +7,8 @@ from contextlib import closing
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 import sys
+from typing import Any
 from zoneinfo import ZoneInfo
-from snowflake.connector import SnowflakeConnection
 
 YAHOO_FX = frozenset(
     "AUDPLN=X AUDUSD=X CHFPLN=X DKKPLN=X EURAUD=X EURCAD=X EURCHF=X "
@@ -20,7 +17,6 @@ YAHOO_FX = frozenset(
     "USDCNY=X USDDKK=X USDJPY=X USDNOK=X USDPLN=X USDSEK=X USDSGD=X".split()
 )
 
-# Keep FW20 selectable for old operators; DERIVATIVES supersedes it in defaults.
 DATASETS = (
     "GPW",
     "US",
@@ -88,24 +84,24 @@ def as_date(value: datetime | date | None) -> date | None:
     return date.fromisoformat(str(value)[:10])
 
 
-def fetch_inventory(connection: SnowflakeConnection, dataset: str) -> list[Instrument]:
-    """Retain registered instruments without any observations."""
+def fetch_inventory(connection: Any, dataset: str) -> list[Instrument]:
+    """Return registered instruments, including those with no price history."""
     if dataset in {"GPW", "US", "PSE", "XETRA", "PARIS", "LSE", "BSE"}:
         sql = '''SELECT s."SYMBOL", MAX(TO_DATE(p."DATE"))
-                 FROM "SECURITIES" s LEFT JOIN "PRICES" p ON p."SYMBOL" = s."SYMBOL"
-                 WHERE s."VENUE" = %s
+                 FROM "SECURITIES" s LEFT JOIN "PRICES" p ON p."SYMBOL"=s."SYMBOL"
+                 WHERE s."VENUE"=%s
                  GROUP BY s."SYMBOL" ORDER BY s."SYMBOL"'''
         params = (dataset,)
     elif dataset == "FX":
         sql = '''SELECT c."SYMBOL", MAX(TO_DATE(r."DATE"))
                  FROM "CURRENCY_PAIRS" c LEFT JOIN "FX_RATES" r
-                    ON r."CURRENCY_PAIR_ID" = c."CURRENCY_PAIR_ID"
-                 WHERE c."IS_ACTIVE" = TRUE
+                 ON r."CURRENCY_PAIR_ID"=c."CURRENCY_PAIR_ID"
+                 WHERE c."IS_ACTIVE"=TRUE
                  GROUP BY c."SYMBOL" ORDER BY c."SYMBOL"'''
         params = ()
     elif dataset == "WIG20":
         sql = """SELECT 'WIG20', MAX(TO_DATE("DATE")) FROM "INDEX_PRICES"
-                 WHERE "INDEX_SYMBOL" = 'WIG20' """
+                 WHERE "INDEX_SYMBOL"='WIG20' """
         params = ()
     elif dataset == "RATES":
         sql = '''SELECT s."SERIES_ID", MAX(o."DATE")
@@ -115,14 +111,14 @@ def fetch_inventory(connection: SnowflakeConnection, dataset: str) -> list[Instr
         params = ()
     elif dataset in {"FW20", "DERIVATIVES"}:
         predicate = (
-            """c."INSTRUMENT_TYPE" = 'FUTURE' AND c."UNDERLYING_SYMBOL" = 'WIG20' """
+            """c."INSTRUMENT_TYPE"='FUTURE' AND c."UNDERLYING_SYMBOL"='WIG20' """
             if dataset == "FW20"
             else """c."INSTRUMENT_TYPE" IN ('FUTURE','OPTION') """
         )
         sql = (
             """SELECT c."CONTRACT_ID", MAX(TO_DATE(p."DATE")), c."EXPIRY_DATE"
                FROM "DERIVATIVE_CONTRACTS" c LEFT JOIN "DERIVATIVE_PRICES" p
-               ON p."CONTRACT_ID" = c."CONTRACT_ID" WHERE """
+               ON p."CONTRACT_ID"=c."CONTRACT_ID" WHERE """
             + predicate
             + '''GROUP BY c."CONTRACT_ID", c."EXPIRY_DATE" ORDER BY c."CONTRACT_ID"'''
         )
@@ -180,7 +176,6 @@ def build_plan(
     groups: dict[tuple[str, date], list[str]] = defaultdict(list)
     derivative_groups: dict[tuple[date, date], list[str]] = defaultdict(list)
     rate_groups: dict[date, list[str]] = defaultdict(list)
-    # When both were selected, avoid scheduling WIG20 futures twice.
     supersede_fw20 = "DERIVATIVES" in datasets and "DERIVATIVES" in inventories
     for dataset in datasets:
         if dataset == "FW20" and supersede_fw20:
@@ -335,18 +330,25 @@ def build_plan(
             report = (
                 f"output/derivative_update_{start:%Y%m%d}_{end:%Y%m%d}_{batch_no}_{chunk[0]}.csv"
             )
-            argv = worker(
-                "run.backfill_derivative_prices",
-                "--start",
-                start.isoformat(),
-                "--end",
-                end.isoformat(),
-                "--symbols",
-                *chunk,
-                "--report",
-                report,
+            jobs.append(
+                Job(
+                    "DERIVATIVES",
+                    chunk,
+                    start,
+                    end,
+                    worker(
+                        "run.backfill_derivative_prices",
+                        "--start",
+                        start.isoformat(),
+                        "--end",
+                        end.isoformat(),
+                        "--symbols",
+                        *chunk,
+                        "--report",
+                        report,
+                    ),
+                )
             )
-            jobs.append(Job("DERIVATIVES", chunk, start, end, argv))
     for start, symbols in sorted(rate_groups.items()):
         for chunk in _chunks(sorted(set(symbols)), batch_size):
             jobs.append(

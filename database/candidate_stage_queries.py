@@ -1,4 +1,4 @@
-"""Transactional candidate-only writes for existing Ikaros price domains."""
+"""Transactional candidate-only storage for equity, WIG20 and derivatives."""
 
 from __future__ import annotations
 from contextlib import closing
@@ -10,13 +10,11 @@ from database.market_quote_pipeline import Candidate as MarketCandidate, save_ca
 def store_equity_candidates(
     connection: Any, candidates: Sequence[EquityCandidate], *, backend: str
 ) -> int:
-    """Commit equity evidence without touching PRICES."""
+    """Append evidence without updating PRICES, on both supported backends."""
     if not candidates:
         return 0
-    if backend != "snowflake":
-        raise ValueError(
-            "Existing equity candidate writer currently requires Snowflake SQL bindings"
-        )
+    if backend not in ("snowflake", "duckdb"):
+        raise ValueError(f"Unsupported database backend {backend!r}")
     with closing(connection.cursor()) as cur:
         try:
             cur.execute("BEGIN")
@@ -31,7 +29,7 @@ def store_equity_candidates(
 def store_market_candidate(
     connection: Any, *, kind: str, candidate: MarketCandidate, backend: str
 ) -> bool:
-    """Commit WIG20/contract evidence; never call promote()."""
+    """Commit market candidates; leave selection and final prices to promoter."""
     with closing(connection.cursor()) as cur:
         try:
             cur.execute("BEGIN")
