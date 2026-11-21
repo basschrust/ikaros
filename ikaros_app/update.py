@@ -196,7 +196,12 @@ def build_plan(
             if dataset == "FX":
                 if symbol in YAHOO_FX:
                     source = "FX-YAHOO"
-                elif symbol.endswith("PLN=X") and symbol[:3].isalpha() and len(symbol) == 8:
+                elif (
+                    len(symbol) == 8
+                    and symbol.endswith("=X")
+                    and symbol[:6].isalpha()
+                    and symbol[:6].isupper()
+                ):
                     source = "FX-NBP"
                 else:
                     skipped.append(f"FX {symbol}: no configured direct feed")
