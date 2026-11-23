@@ -12,6 +12,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import duckdb
+
 
 DEFAULT_CONTRACTS = Path("data/derivative_contracts.csv")
 
@@ -25,6 +27,25 @@ def resolve_contracts_csv(*, project_root: Path, requested: Path | None) -> Path
         return path
     default = project_root / DEFAULT_CONTRACTS
     return default if default.is_file() else None
+
+
+def _duckdb_connection_error(*, error: duckdb.IOException) -> str:
+    """Translate an unavailable DuckDB connection into an actionable CLI message."""
+    details = str(error)
+    lock_marker = "file is already open in"
+    marker_position = details.lower().find(lock_marker)
+    if marker_position >= 0:
+        lock_owner = details[marker_position + len(lock_marker) :].strip()
+        return (
+            "ERROR: Cannot open Ikaros DuckDB: database is locked by another process.\n"
+            f"Lock owner: {lock_owner}\n"
+            "Disconnect the database in DBeaver or the other application and retry.\n"
+        )
+    return (
+        "ERROR: Cannot open Ikaros DuckDB.\n"
+        f"DuckDB details: {details}\n"
+        "Check the database path and file permissions, then retry.\n"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -63,7 +84,12 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"Derivative registry: {contracts_csv}")
 
-    with repository_from_config(config) as repo:
+    try:
+        repository = repository_from_config(config)
+    except duckdb.IOException as exc:
+        parser.exit(status=1, message=_duckdb_connection_error(error=exc))
+
+    with repository as repo:
         report = bootstrap(
             repo.connection,
             project_root=PROJECT_ROOT,
