@@ -25,6 +25,7 @@ _TO_DECIMAL = re.compile(
 _TO_DATE = re.compile(r"\bTO_DATE\(\s*([^()]+?)\s*\)", re.IGNORECASE)
 _TIMESTAMP = re.compile(r"\bTO_TIMESTAMP_NTZ\(\s*([^()]+?)\s*\)", re.IGNORECASE)
 _NEXTVAL = re.compile(r'"([A-Za-z_][\w]*)"\.NEXTVAL\b', re.IGNORECASE)
+_CURRENT_TIMESTAMP_CALL = re.compile(r"\bCURRENT_TIMESTAMP\s*\(\s*\)", re.IGNORECASE)
 
 
 def duckdb_sql(sql: str) -> str:
@@ -35,6 +36,8 @@ def duckdb_sql(sql: str) -> str:
     statement = _TO_DATE.sub(r"CAST(\1 AS DATE)", statement)
     statement = _TIMESTAMP.sub(r"CAST(\1 AS TIMESTAMP)", statement)
     statement = _NEXTVAL.sub(lambda m: f"nextval('{m.group(1)}')", statement)
+    # Snowflake accepts CURRENT_TIMESTAMP(); DuckDB uses the SQL keyword.
+    statement = _CURRENT_TIMESTAMP_CALL.sub("CURRENT_TIMESTAMP", statement)
     statement = statement.replace("%s", "?")
     return statement
 
