@@ -1,0 +1,28 @@
+{
+  "branch": "feature/clean_ni",
+  "baseline_sha": "3b6d1dce6fc473318fc67f37fdf5ada0e2699006",
+  "p0_complete": false,
+  "p1_complete": false,
+  "sha256": {
+    "README.md": "95d7fcf9907a19469d8da9ae094047230e39c57be083b1ecd3a7ce3f224a73b3",
+    "docs/P0_P1_STATUS.md": "a869f275b41e26f270a051692f67636efddc3a14e9e540516a0e1a01b5782184",
+    "database/final_write_guard.py": "af81aca3e5ee184caba44803e0fdb685907e1ef3b40f35f790a4888ed1808ab0",
+    "database/kafka_candidate_sink.py": "5f9fe592d5d17d76556c693de29c06dcd3f93294599dbcb6bf071bcf9c4d06f7",
+    "database/repositories/factory.py": "856bee88ca6ccfa7c70903dac1ebb8cfb176a980fc238d3f3d1cda0403a7ca9a",
+    "database/isolated/__init__.py": "10860200d81d0565c03401e040a1a767d644a96dd8c9fd13039c975191bf1bce",
+    "database/isolated/run_ingest_index_prices.py": "49d61ef237d7fab285305e489d67e804c4b1fbd1c37234a8b8ac49c5e3f84afe",
+    "database/isolated/run_refresh_fw20_prices.py": "274e3614db91292e00bf3c164dedc7b66c2c9d858c8a0768e1acd3053ef87e6a",
+    "ingestion/kafka_snowflake_sink.py": "5286edbbad6ff1c7a2478516c812625b1caa8638b3bac009c48bf59464c6b91f",
+    "run/kafka_sink.py": "52dd24264295f14414551478a30b143858957e7ae29bf560d6ffa0c2ecedd19e",
+    "run/ingest_fx_rates.py": "f8a7733a156cdc901d20dfc1b38303307b85b0f4c27d7de33f0a0b862b45c5e1",
+    "run/basic_ingest.py": "ca122a04f494c54ef566ae71d03f1641bd42073d3a944b7db5a18debc060e20a",
+    "run/ingest_index_prices.py": "a26e649e9d3a5584f8944bf623966ca77925c2a3787a484dd16a530d2f05ac6e",
+    "run/refresh_fw20_prices.py": "0dbbaa8217b2370c67bbe60565577b43f56c4c58ace4daab5d14a0293a9098a3",
+    "tools/build_db_query_refactor.py": "09892d8d3051e1555155441017e5d8dcb7a2b293388d5561a611e06cb544c1a1",
+    "tools/audit_db_boundary.py": "fccc3d5550cac51e4765de8bc41e2363dc1204c5f65f882836f3252e804008ff",
+    "tests/database/test_final_write_guard.py": "456ec38d06fe548250b3b8719d9735b1b231d3d14a227f804b4c4e4e3f1ba641",
+    "tests/database/test_kafka_candidate_sink.py": "cef08db66b8d745357e7d101f833fac1d20268e068e4bb6d6e408b5e35a97d7d",
+    "tests/database/test_query_refactor_builder.py": "8eef337dd26349492da75e2e775354c4f5a097ec0a223b6f0a9a2f1892f5a331",
+    "tests/database/test_db_boundary_audit.py": "8db75e57af15543cc968358e2f2e435a929c606ea3f48c0687a2ceb23dae729a"
+  }
+}

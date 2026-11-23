@@ -37,7 +37,9 @@ def test_gpw_routes_to_multi_provider_using_existing_window_and_batch() -> None:
     assert update_all.command_for_job(data) == (
         sys.executable,
         "-m",
-        "run.ingest_gpw_prices",
+        "run.stage_candidates",
+        "--dataset",
+        "GPW",
         "--symbols",
         "PZU.WA",
         "ALE.WA",
@@ -64,9 +66,9 @@ def test_index_and_derivatives_route_to_candidate_pipeline(
     assert update_all.command_for_job(data) == (
         sys.executable,
         "-m",
-        "run.ingest_market_prices",
+        "run.stage_candidates",
         "--dataset",
-        market_dataset,
+        "DERIVATIVES" if dataset == "FW20" else dataset,
         "--symbols",
         *symbols,
         "--start",
@@ -77,12 +79,13 @@ def test_index_and_derivatives_route_to_candidate_pipeline(
 
 
 @pytest.mark.parametrize("dataset", ["FX-YAHOO", "US", "RATES"])
-def test_other_datasets_keep_existing_worker(dataset: str) -> None:
+def test_other_datasets_use_candidate_staging(dataset: str) -> None:
     data = job(dataset)
-    assert update_all.command_for_job(data) == data.argv
+    assert update_all.command_for_job(data)[2] == "run.stage_candidates"
+    assert update_all.command_for_job(data)[4] == ("FX" if dataset == "FX-YAHOO" else dataset)
 
 
-def test_update_all_write_invokes_multi_source_and_preserves_other_workers(monkeypatch) -> None:
+def test_update_all_stages_then_promotes_all_including_fx(monkeypatch) -> None:
     import config.config
     import database.repositories.factory
 
@@ -117,11 +120,12 @@ def test_update_all_write_invokes_multi_source_and_preserves_other_workers(monke
     calls: list[list[str]] = []
     monkeypatch.setattr(update_all.subprocess, "call", lambda cmd: calls.append(cmd) or 0)
     assert update_all.main(["--datasets", "GPW", "FX", "--write", "--through", "2026-11-17"]) == 0
-    assert len(calls) == 2
-    assert calls[0][2] == "run.ingest_gpw_prices"
-    assert calls[0][-1] == "--write"
-    assert calls[1][2] == "run.backfill_equities"  # unchanged test fixture argv
-    assert calls[1][-1] == "--write"
+    assert len(calls) == 4
+    assert [cmd[2] for cmd in calls] == ["run.stage_candidates"] * 2 + [
+        "run.promote_candidates"
+    ] * 2
+    assert [cmd[4] for cmd in calls] == ["GPW", "FX", "GPW", "FX"]
+    assert all(cmd[-1] == "--write" for cmd in calls)
 
 
 def test_update_all_write_invokes_index_and_derivative_candidate_workers(monkeypatch) -> None:
@@ -166,9 +170,11 @@ def test_update_all_write_invokes_index_and_derivative_candidate_workers(monkeyp
         )
         == 0
     )
-    assert len(calls) == 2
-    assert [call[2] for call in calls] == ["run.ingest_market_prices"] * 2
-    assert [call[4] for call in calls] == ["INDEX", "DERIVATIVE"]
+    assert len(calls) == 4
+    assert [call[2] for call in calls] == ["run.stage_candidates"] * 2 + [
+        "run.promote_candidates"
+    ] * 2
+    assert [call[4] for call in calls] == ["WIG20", "DERIVATIVES", "WIG20", "DERIVATIVES"]
     assert all(call[-1] == "--write" for call in calls)
 
 

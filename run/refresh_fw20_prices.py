@@ -7,7 +7,7 @@ Dry-run by default; no contract registration or price synthesis.
 from __future__ import annotations
 
 import argparse
-from contextlib import closing
+
 from datetime import date, timedelta
 from pathlib import Path
 import logging
@@ -22,14 +22,9 @@ URL = "https://www.biznesradar.pl/notowania-historyczne/{}"
 
 
 def registered(connection: SnowflakeConnection) -> list[str]:
-    with closing(connection.cursor()) as cur:
-        cur.execute(
-            'SELECT DISTINCT "CONTRACT_ID" FROM "DERIVATIVE_CONTRACTS" '
-            'WHERE "INSTRUMENT_TYPE" = %s AND "UNDERLYING_SYMBOL" = %s '
-            'ORDER BY "CONTRACT_ID"',
-            ("FUTURE", "WIG20"),
-        )
-        return [str(row[0]) for row in cur.fetchall() if CONTRACT.fullmatch(str(row[0]))]
+    from database.isolated.run_refresh_fw20_prices import registered as _isolated_impl
+
+    return _isolated_impl(connection)
 
 
 def retrieve(symbol: str, *, html_dir: Path | None, timeout: int) -> str:
@@ -47,42 +42,9 @@ def retrieve(symbol: str, *, html_dir: Path | None, timeout: int) -> str:
 
 
 def persist(connection: SnowflakeConnection, rows: list[dict]) -> None:
-    # Only overwrite rows already sourced from this same HTML series; do not
-    # replace manual or independently sourced futures data.
-    sql = """MERGE INTO "DERIVATIVE_PRICES" t USING (
-        SELECT %s::VARCHAR AS cid, TO_DATE(%s) AS day,
-               %s::FLOAT AS op, %s::FLOAT AS hi, %s::FLOAT AS lo,
-               %s::FLOAT AS cl, %s::FLOAT AS vol, %s::VARCHAR AS src
-    ) s ON t."CONTRACT_ID" = s.cid AND t."DATE" = s.day
-    WHEN MATCHED AND t."SOURCE" = s.src THEN UPDATE SET
-        t."OPEN"=s.op, t."HIGH"=s.hi, t."LOW"=s.lo,
-        t."CLOSE"=s.cl, t."VOLUME"=s.vol,
-        t."INGESTED_AT"=CURRENT_TIMESTAMP()
-    WHEN NOT MATCHED THEN INSERT
-        ("CONTRACT_ID","DATE","OPEN","HIGH","LOW","CLOSE","VOLUME",
-         "OPEN_INTEREST","SETTLEMENT","SOURCE")
-        VALUES (s.cid,s.day,s.op,s.hi,s.lo,s.cl,s.vol,NULL,NULL,s.src)"""
-    with closing(connection.cursor()) as cur:
-        try:
-            cur.execute("BEGIN")
-            for r in rows:
-                cur.execute(
-                    sql,
-                    (
-                        r["contract_id"],
-                        r["date"].isoformat(),
-                        r["open"],
-                        r["high"],
-                        r["low"],
-                        r["close"],
-                        r["volume"],
-                        r["source"],
-                    ),
-                )
-            cur.execute("COMMIT")
-        except Exception:
-            cur.execute("ROLLBACK")
-            raise
+    from database.isolated.run_refresh_fw20_prices import persist as _isolated_impl
+
+    return _isolated_impl(connection, rows)
 
 
 def main():

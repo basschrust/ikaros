@@ -1,12 +1,8 @@
-"""Refresh Ikaros data and repair historical WIG20/GPW equity session gaps.
+"""Candidate-first daily update against Snowflake OR local DuckDB.
 
-Examples:
-  uv run --extra snowflake python -m run.update_all --datasets WIG20 --write
-  uv run --extra snowflake python -m run.update_all --datasets WIG20 --repair-only --write
-  uv run --extra snowflake python -m run.update_all --write
-
-GPW equities, WIG20 and derivatives use candidate pipelines. Other venues,
-FX and rates still use their existing source-specific importers.
+Each source worker appends validated candidate rows. An independent promoter
+then reads those committed rows and publishes the selected observations.
+Run `python -m run.setup_local_duckdb --write` to seed a NEW local database.
 """
 
 from __future__ import annotations
@@ -17,90 +13,77 @@ import subprocess
 import sys
 from datetime import date
 
-from ikaros_app.update import (
-    DATASETS,
-    Job,
-    build_plan,
-    fetch_inventory,
-    yesterday_warsaw,
-)
+from ikaros_app.update import DATASETS, Job, build_plan, fetch_inventory, yesterday_warsaw
 
 LOG = logging.getLogger("ikaros.update")
 
 
+def _candidate_dataset(dataset: str) -> str:
+    if dataset in ("FX-YAHOO", "FX-NBP"):
+        return "FX"
+    if dataset == "FW20":
+        return "DERIVATIVES"
+    return dataset
+
+
 def command_for_job(job: Job) -> tuple[str, ...]:
-    """Route instrument prices through validated candidates where supported."""
-    if job.dataset == "GPW":
-        return (
-            sys.executable,
-            "-m",
-            "run.ingest_gpw_prices",
-            "--symbols",
-            *job.symbols,
-            "--start",
-            job.start.isoformat(),
-            "--end",
-            job.end.isoformat(),
-        )
-    if job.dataset in ("WIG20", "DERIVATIVES", "FW20"):
-        return (
-            sys.executable,
-            "-m",
-            "run.ingest_market_prices",
-            "--dataset",
-            "INDEX" if job.dataset == "WIG20" else "DERIVATIVE",
-            "--symbols",
-            *job.symbols,
-            "--start",
-            job.start.isoformat(),
-            "--end",
-            job.end.isoformat(),
-        )
-    return job.argv
+    return (
+        sys.executable,
+        "-m",
+        "run.stage_candidates",
+        "--dataset",
+        _candidate_dataset(job.dataset),
+        "--symbols",
+        *job.symbols,
+        "--start",
+        job.start.isoformat(),
+        "--end",
+        job.end.isoformat(),
+    )
+
+
+def promotion_command_for_job(job: Job) -> tuple[str, ...]:
+    return (
+        sys.executable,
+        "-m",
+        "run.promote_candidates",
+        "--dataset",
+        _candidate_dataset(job.dataset),
+        "--symbols",
+        *job.symbols,
+        "--start",
+        job.start.isoformat(),
+        "--end",
+        job.end.isoformat(),
+    )
 
 
 def _dedupe_jobs(jobs: list[Job]) -> list[Job]:
-    """Avoid executing identical date/symbol jobs more than once."""
     result: list[Job] = []
     seen: set[tuple[str, tuple[str, ...], date, date]] = set()
     for job in jobs:
-        identity = (job.dataset, job.symbols, job.start, job.end)
-        if identity not in seen:
+        key = (job.dataset, job.symbols, job.start, job.end)
+        if key not in seen:
             result.append(job)
-            seen.add(identity)
+            seen.add(key)
     return result
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--datasets", choices=DATASETS, nargs="+", default=list(DATASETS))
-    parser.add_argument("--write", action="store_true", help="Execute workers (default plan-only)")
-    parser.add_argument("--through", type=date.fromisoformat, help="Completed target date")
+    parser.add_argument(
+        "--write", action="store_true", help="Execute stage and promote (default plan-only)"
+    )
+    parser.add_argument("--through", type=date.fromisoformat, help="Last completed date")
     parser.add_argument("--overlap-days", type=int, default=2)
     parser.add_argument("--max-gap-days", type=int, default=90)
     parser.add_argument("--bootstrap-start", type=date.fromisoformat)
     parser.add_argument("--batch-size", type=int, default=30)
-    parser.add_argument(
-        "--repair-lookback-sessions",
-        type=int,
-        default=20,
-        help="Scan last N completed GPW sessions for earlier missing observations",
-    )
-    parser.add_argument(
-        "--no-gap-repair",
-        action="store_true",
-        help="Ordinary latest-date catch-up only",
-    )
-    parser.add_argument(
-        "--repair-only",
-        action="store_true",
-        help="Only repair earlier missing sessions; skip latest-date catch-up",
-    )
-    parser.add_argument(
-        "--recheck-derivatives",
-        action="store_true",
-        help="Replay futures/options history without inventing no-trade bars",
-    )
+    parser.add_argument("--repair-lookback-sessions", type=int, default=20)
+    parser.add_argument("--no-gap-repair", action="store_true")
+    parser.add_argument("--repair-only", action="store_true")
+    parser.add_argument("--recheck-derivatives", action="store_true")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     target = args.through or yesterday_warsaw()
@@ -117,23 +100,26 @@ def main(argv: list[str] | None = None) -> int:
     if args.repair_only and not (
         {"GPW", "WIG20"}.intersection(args.datasets) or args.recheck_derivatives
     ):
-        parser.error(
-            "--repair-only supports GPW/WIG20, or --recheck-derivatives "
-            "for registered futures/options"
-        )
+        parser.error("--repair-only requires GPW/WIG20 or --recheck-derivatives")
     if args.recheck_derivatives and not {"DERIVATIVES", "FW20"}.intersection(args.datasets):
-        parser.error("--recheck-derivatives requires DERIVATIVES or FW20 in --datasets")
+        parser.error("--recheck-derivatives requires DERIVATIVES or FW20")
 
     from config.config import load_config
     from database.repositories.factory import repository_from_config
     from ikaros_app.gap_repair import gap_repair_jobs
 
     config = load_config("database.yaml")
-    if config.get("database", {}).get("driver", "").lower() != "snowflake":
-        parser.error("Select Snowflake in config/database.yaml")
+    backend = config.get("database", {}).get("driver", "").lower()
+    if backend not in ("snowflake", "duckdb"):
+        parser.error("Select snowflake or duckdb in IKAROS_DB_DRIVER or config/database.yaml")
     selected = tuple(dict.fromkeys(args.datasets))
     with repository_from_config(config) as repo:
         inventories = {dataset: fetch_inventory(repo.connection, dataset) for dataset in selected}
+        if backend == "duckdb" and not any(inventories.values()):
+            LOG.error(
+                "Local database has no instrument inventory. Run run.setup_local_duckdb --write first"
+            )
+            return 1
         plan = (
             build_plan(
                 inventories,
@@ -169,19 +155,13 @@ def main(argv: list[str] | None = None) -> int:
                     len(missing_jobs),
                 )
                 for symbol, dates in sorted(missing.items()):
-                    LOG.info(
-                        "MISSING %s %s: %s",
-                        dataset,
-                        symbol,
-                        ", ".join(map(str, dates)),
-                    )
+                    LOG.info("MISSING %s %s: %s", dataset, symbol, ", ".join(map(str, dates)))
         if args.recheck_derivatives:
             from ikaros_app.update import worker
             from run.ingest_gpw_prices import last_gpw_sessions
 
             first = last_gpw_sessions(target, args.repair_lookback_sessions)[0]
             kind = "DERIVATIVES" if "DERIVATIVES" in inventories else "FW20"
-            # No inference: sparse futures/options may legitimately not trade.
             eligible = sorted(
                 {
                     row.symbol
@@ -202,7 +182,6 @@ def main(argv: list[str] | None = None) -> int:
                 )
             LOG.info("RECHECK %s contracts=%d from=%s", kind, len(eligible), first)
 
-    # Ordinary catch-up can already encompass some repair dates.
     normal = plan.jobs if plan else []
     pending_repairs = [
         repair
@@ -217,27 +196,22 @@ def main(argv: list[str] | None = None) -> int:
     ]
     jobs = _dedupe_jobs(normal + pending_repairs)
     LOG.info(
-        "Completed target=%s; jobs=%d repair_jobs=%d write=%s",
+        "Backend=%s target=%s jobs=%d repair_jobs=%d write=%s",
+        backend,
         target,
         len(jobs),
         len(pending_repairs),
         args.write,
     )
-    legacy = set(selected) - {"GPW", "WIG20", "DERIVATIVES", "FW20"}
-    if legacy:
-        LOG.warning(
-            "LEGACY SOURCE ROUTES (not yet candidate-based): %s. "
-            "Separate provider mappings and validation are still needed.",
-            ", ".join(sorted(legacy)),
-        )
     if plan is not None:
         for line in plan.skipped:
             LOG.warning("SKIP %s", line)
     failures = 0
+    staged_jobs: list[Job] = []
     for number, job in enumerate(jobs, 1):
         cmd = list(command_for_job(job)) + (["--write"] if args.write else [])
         LOG.info(
-            "[%d/%d] %s %s..%s symbols=%s: %s",
+            "STAGE [%d/%d] %s %s..%s symbols=%s: %s",
             number,
             len(jobs),
             job.dataset,
@@ -246,11 +220,29 @@ def main(argv: list[str] | None = None) -> int:
             ",".join(job.symbols),
             " ".join(cmd),
         )
-        if args.write and subprocess.call(cmd):
-            failures += 1
-            LOG.error("FAILED job %d", number)
+        if args.write:
+            if subprocess.call(cmd):
+                failures += 1
+                LOG.error("STAGE FAILED job %d; promotion will not run for this window", number)
+            else:
+                staged_jobs.append(job)
+    if args.write:
+        for number, job in enumerate(staged_jobs, 1):
+            cmd = list(promotion_command_for_job(job)) + ["--write"]
+            LOG.info(
+                "PROMOTE [%d/%d] %s %s..%s symbols=%s: %s",
+                number,
+                len(staged_jobs),
+                job.dataset,
+                job.start,
+                job.end,
+                ",".join(job.symbols),
+                " ".join(cmd),
+            )
+            if subprocess.call(cmd):
+                failures += 1
+                LOG.error("PROMOTION FAILED job %d", number)
     if args.write and "WIG20" in selected and not args.no_gap_repair:
-        # Confirm the hole was actually filled, not just the worker's exit code.
         from ikaros_app.gap_repair import missing_sessions
 
         with repository_from_config(config) as repo:
@@ -266,12 +258,7 @@ def main(argv: list[str] | None = None) -> int:
         if remaining:
             failures += 1
             LOG.error("WIG20 session gaps remain after update: %s", remaining)
-    LOG.info(
-        "Finished jobs=%d failed=%d dry_run=%s",
-        len(jobs),
-        failures,
-        not args.write,
-    )
+    LOG.info("Finished jobs=%d failed=%d dry_run=%s", len(jobs), failures, not args.write)
     return 1 if failures else 0
 
 

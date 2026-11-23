@@ -1,10 +1,7 @@
-"""Backfill registered FX pairs from official NBP Table A mid/reference rates.
+"""Legacy NBP reference-rate backfill plus reusable HTTP data source.
 
-Read-only dry run by default. Inserts only missing (currency_pair_id, date)
-into FX_RATES. Source rows contain CLOSE only; OHLC/VOLUME stay NULL.
-
-Example:
-    uv run --extra snowflake python -m run.backfill_fx_nbp --start 2002-01-02 --end 2019-12-31 --write
+Daily candidate staging uses only fetch_tables(); direct final-table writes are
+blocked by the repository candidate guard. No Snowflake import is required.
 """
 
 from __future__ import annotations
@@ -14,22 +11,22 @@ from contextlib import closing
 from datetime import date
 import logging
 import time
-from snowflake.connector import SnowflakeConnection
-from requests import Session
+from typing import Any
 
+from requests import Session
 from ingestion.nbp_fx import cross_rows, parse_table, windows
 
 LOG = logging.getLogger("ikaros.fx.nbp")
 API = "https://api.nbp.pl/api/exchangerates/tables/a/{}/{}/"
 
 
-def registered_pairs(connection: SnowflakeConnection) -> dict[str, int]:
+def registered_pairs(connection: Any) -> dict[str, int]:
     with closing(connection.cursor()) as cur:
         cur.execute(
             'SELECT "SYMBOL", "CURRENCY_PAIR_ID" FROM "CURRENCY_PAIRS" WHERE "IS_ACTIVE" = TRUE'
         )
         rows = cur.fetchall()
-    pairs = {}
+    pairs: dict[str, int] = {}
     for symbol, pair_id in rows:
         if symbol in pairs:
             raise ValueError(f"Duplicate active FX reference symbol {symbol}")
@@ -52,10 +49,8 @@ def fetch_tables(session: Session, start: date, end: date, *, timeout: int = 30)
     return parse_table(payload)
 
 
-def persist(
-    connection: SnowflakeConnection, rows: list[tuple[str, date, float, str]], ids: dict[str, int]
-):
-    """Atomic insert-only MERGE per date-window, preserving all market-source rows."""
+def persist(connection: Any, rows: list[tuple[str, date, float, str]], ids: dict[str, int]) -> int:
+    """Legacy direct writer. Candidate guard blocks writes outside promotion."""
     if not rows:
         return 0
     stage = """CREATE TEMP TABLE IF NOT EXISTS "IKAROS_NBP_FX_STAGE" (
@@ -86,14 +81,14 @@ def persist(
     return inserted
 
 
-def main():
+def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--start", type=date.fromisoformat, default=date(2002, 1, 2))
     p.add_argument("--end", type=date.fromisoformat, default=date.today())
     p.add_argument(
         "--symbols", nargs="+", help="Specific registered pairs; default all active pairs"
     )
-    p.add_argument("--write", action="store_true", help="Insert missing reference closes")
+    p.add_argument("--write", action="store_true", help="Legacy direct write (blocked by guard)")
     p.add_argument("--delay", type=float, default=0.25)
     p.add_argument("--timeout", type=int, default=30)
     p.add_argument("--continue-on-error", action="store_true")
@@ -109,7 +104,7 @@ def main():
 
     config = load_config("database.yaml")
     if config.get("database", {}).get("driver", "").lower() != "snowflake":
-        p.error("Select Snowflake in config/database.yaml")
+        p.error("Legacy direct writer requires Snowflake; use run.stage_candidates for local mode")
     with repository_from_config(config) as repo, requests.Session() as session:
         pairs = registered_pairs(repo.connection)
         symbols = args.symbols or list(pairs)

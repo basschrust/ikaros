@@ -1,0 +1,26 @@
+# Add these lines to your existing Ikaros .env (do not replace existing secrets).
+# Store the DuckDB file in Daedalus's input/market_data directory.
+# Use your ACTUAL directory; it may be one level below pymarketsim.
+IKAROS_DB_DRIVER=duckdb
+IKAROS_MARKET_DATA_DIR=C:/projects_AK/Daedalus/input/market_data
+
+# For CLOUD ONLY, switch the driver and configure ONE auth method.
+# IKAROS_DB_DRIVER=snowflake
+# SNOWFLAKE_ACCOUNT=your-org-your-account
+# SNOWFLAKE_USER=your-login
+# SNOWFLAKE_ROLE=your-data-role
+#
+# Interactive TOTP: set SNOWFLAKE_AUTHENTICATOR=username_password_mfa,
+# and run: uv run --extra snowflake python -m run.check_snowflake_auth --totp
+# SNOWFLAKE_AUTHENTICATOR=username_password_mfa
+# SNOWFLAKE_PASSWORD=use-existing-secret
+#
+# Unattended key-pair service identity (recommended for a scheduler):
+# SNOWFLAKE_AUTHENTICATOR=snowflake_jwt
+# SNOWFLAKE_PRIVATE_KEY_FILE=C:/secure/ikaros_key.p8
+# SNOWFLAKE_PRIVATE_KEY_PASSWORD=use-existing-secret-storage
+#
+# Programmatic access token (subject to Snowflake network/auth policies):
+# SNOWFLAKE_AUTHENTICATOR=snowflake
+# SNOWFLAKE_PROGRAMMATIC_ACCESS_TOKEN=use-existing-secret-storage
+# NEVER store a time-limited MFA passcode in .env.

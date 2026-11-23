@@ -78,8 +78,8 @@ def test_index_finds_one_hole_but_not_november_11_holiday():
     assert len(jobs) == 1
     assert jobs[0].start == jobs[0].end == date(2026, 11, 16)
     command = update_all.command_for_job(jobs[0])
-    assert command[2:4] == ("run.ingest_market_prices", "--dataset")
-    assert command[4] == "INDEX"
+    assert command[2:4] == ("run.stage_candidates", "--dataset")
+    assert command[4] == "WIG20"
     assert command[-4:] == ("--start", "2026-11-16", "--end", "2026-11-16")
 
 
@@ -108,7 +108,7 @@ def test_equity_hole_only_for_affected_symbol_and_gap_job_uses_candidates():
     assert missing == {"PZU.WA": (date(2026, 11, 16),)}
     assert len(jobs) == 1
     command = update_all.command_for_job(jobs[0])
-    assert command[2] == "run.ingest_gpw_prices"
+    assert command[2] == "run.stage_candidates"
     assert "PZU.WA" in command
     assert "ALE.WA" not in command
 
@@ -171,7 +171,7 @@ def test_future_contracts_are_routed_through_candidates_not_legacy():
         ("python", "-m", "run.refresh_fw20_prices"),
     )
     argv = update_all.command_for_job(entry)
-    assert argv[2:5] == ("run.ingest_market_prices", "--dataset", "DERIVATIVE")
+    assert argv[2:5] == ("run.stage_candidates", "--dataset", "DERIVATIVES")
 
 
 def test_duplicate_jobs_not_executed_twice():
@@ -220,9 +220,10 @@ def test_repair_only_executes_gap_job_and_verifies_readback(monkeypatch):
 
     def execute(cmd):
         calls.append(cmd)
-        assert cmd[2] == "run.ingest_market_prices"
+        assert cmd[2] in ("run.stage_candidates", "run.promote_candidates")
         assert cmd[-1] == "--write"
-        db.inner.execute("INSERT INTO INDEX_PRICES VALUES ('WIG20','2026-11-16')")
+        if cmd[2] == "run.promote_candidates":
+            db.inner.execute("INSERT INTO INDEX_PRICES VALUES ('WIG20','2026-11-16')")
         return 0
 
     monkeypatch.setattr(update_all.subprocess, "call", execute)
@@ -241,7 +242,7 @@ def test_repair_only_executes_gap_job_and_verifies_readback(monkeypatch):
         )
         == 0
     )
-    assert len(calls) == 1
+    assert len(calls) == 2
 
 
 def test_worker_success_is_not_enough_if_index_hole_remains(monkeypatch):
@@ -315,8 +316,9 @@ def test_explicit_derivative_history_replay_never_creates_synthetic_quotes(monke
         )
         == 0
     )
-    assert len(commands) == 1
-    assert commands[0][2:5] == ["run.ingest_market_prices", "--dataset", "DERIVATIVE"]
+    assert len(commands) == 2
+    assert commands[0][2:5] == ["run.stage_candidates", "--dataset", "DERIVATIVES"]
+    assert commands[1][2:5] == ["run.promote_candidates", "--dataset", "DERIVATIVES"]
     assert "FW20Z2620" in commands[0]
     assert "FW20U2620" not in commands[0]
     assert commands[0][-5:] == ["--start", "2026-11-12", "--end", "2026-11-18", "--write"]

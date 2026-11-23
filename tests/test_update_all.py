@@ -27,11 +27,14 @@ def test_latest_date_per_symbol_and_source_selection():
         target=TARGET,
     )
     assert {job.dataset for job in plan.jobs} == {"GPW", "FX-YAHOO", "FX-NBP", "WIG20", "FW20"}
-    assert any("EURCZK=X: no configured direct feed" in msg for msg in plan.skipped)
+    assert not any("EURCZK=X" in msg for msg in plan.skipped)
     assert all("--write" not in job.argv for job in plan.jobs)
     gpw = [job for job in plan.jobs if job.dataset == "GPW"]
     assert len(gpw) == 2  # distinct latest dates must not be collapsed
-    assert next(j for j in plan.jobs if j.dataset == "FX-NBP").symbols == ("HUFPLN=X",)
+    assert next(j for j in plan.jobs if j.dataset == "FX-NBP").symbols == (
+        "EURCZK=X",
+        "HUFPLN=X",
+    )
 
 
 def test_skips_no_history_stale_and_expired():
