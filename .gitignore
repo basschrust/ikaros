@@ -22,7 +22,6 @@ develop-eggs/
 dist/
 downloads/
 eggs/
-.eggs/
 lib/
 lib64/
 parts/
@@ -52,6 +51,8 @@ wandb/
 # temporary files
 tmp/
 
-# output data
-data/
+# Local data: only the reviewed example contract manifest is versioned.
+# Personal universe CSVs and data/derivative_contracts.csv remain ignored.
+data/*
+!data/derivative_contracts.example.csv
 output/
