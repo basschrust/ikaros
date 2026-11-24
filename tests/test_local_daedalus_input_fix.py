@@ -33,10 +33,20 @@ class InMemorySql:
         )
         self.db.execute('CREATE TABLE "SECURITIES" ("SYMBOL" VARCHAR, "VENUE" VARCHAR)')
 
-    def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
+    def execute(self, sql: str, params: tuple[object, ...] = ()) -> sqlite3.Cursor:
         if "information_schema.columns" in sql:
             return self.db.execute('SELECT name FROM pragma_table_info("DERIVATIVE_CONTRACTS")')
-        return self.db.execute(sql, params)
+        # SQLite 3.12+ deprecates its implicit datetime.date adapter.
+        # Bind dates and decimals explicitly, without mutating process-wide adapters.
+        adapted = tuple(
+            value.isoformat()
+            if isinstance(value, date)
+            else str(value)
+            if isinstance(value, Decimal)
+            else value
+            for value in params
+        )
+        return self.db.execute(sql, adapted)
 
 
 def _snap() -> tuple[date, list[dict]]:
@@ -83,7 +93,6 @@ def test_reject_missing_option_metadata() -> None:
 
 
 def test_additive_ddl_and_reference_insert() -> None:
-    sqlite3.register_adapter(Decimal, str)
     conn = InMemorySql()
     conn.execute(
         'INSERT INTO "DERIVATIVE_CONTRACTS" VALUES (?,?,?,?)',
@@ -123,4 +132,17 @@ def test_verified_pzu_history() -> None:
         Decimal("67.00"),
         Decimal("67.46"),
         3574250,
+    )
+
+
+def test_sqlite_fixture_binds_dates_and_decimals_explicitly() -> None:
+    connection = InMemorySql()
+    connection.execute('CREATE TABLE "TYPES_TEST" ("DATE" VARCHAR, "AMOUNT" VARCHAR)')
+    connection.execute(
+        'INSERT INTO "TYPES_TEST" ("DATE", "AMOUNT") VALUES (?, ?)',
+        (date(2026, 11, 20), Decimal("12.50")),
+    )
+    assert connection.execute('SELECT "DATE", "AMOUNT" FROM "TYPES_TEST"').fetchone() == (
+        "2026-11-20",
+        "12.50",
     )
