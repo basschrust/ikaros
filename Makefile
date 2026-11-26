@@ -2,9 +2,9 @@
 
 # Use the project environment directly: no activation or uv on PATH required.
 ifeq ($(OS),Windows_NT)
-PYTHON ?= .venv/Scripts/python.exe
+PYTHON ?= Ikaros/Scripts/python.exe
 else
-PYTHON ?= .venv/bin/python
+PYTHON ?= Ikaros/bin/python
 endif
 
 test:
