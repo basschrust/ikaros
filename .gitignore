@@ -5,13 +5,9 @@
 *.png
 *.zip
 *.log
-
-# Local credentials and environment files
 .env
 .env.*
 !.env.example
-
-# Python package related
 __pycache__/
 *.py[cod]
 *$py.class
@@ -22,6 +18,7 @@ develop-eggs/
 dist/
 downloads/
 eggs/
+.eggs/
 lib/
 lib64/
 parts/
@@ -31,28 +28,23 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-
-# Virtual Environment
 .venv/
 .venv_old/
 venv/
 env/
 ENV/
-
-# IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-
-# Weights & Biases
 wandb/
-
-# temporary files
 tmp/
-
-# Local data: only the reviewed example contract manifest is versioned.
-# Personal universe CSVs and data/derivative_contracts.csv remain ignored.
+# Keep downloaded data and personal manifests local; version only reviewed reference inputs.
 data/*
 !data/derivative_contracts.example.csv
+!data/gpw_stocks.wig20.csv
+!data/provider_symbols_gpw_wig20.csv
+!data/wig20_gpw_official_sept2026.csv
+!data/wig20_gpw_verified_contracts_2026_10.csv
+!data/wig20_gpw_verified_options_extra.csv
 output/

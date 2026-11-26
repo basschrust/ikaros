@@ -1,0 +1,15 @@
+contract_id,symbol,instrument_type,underlying_symbol,expiry_date,currency,multiplier,strike,option_side,source
+FW20Z2620,FW20Z2620,FUTURE,WIG20,2026-12-18,PLN,20,,,https://www.gpw.pl/pub/GPW/statystyki/statystyki_miesieczne/202610_GPW.pdf
+FW20H2720,FW20H2720,FUTURE,WIG20,2027-03-19,PLN,20,,,https://www.gpw.pl/pub/GPW/statystyki/statystyki_miesieczne/202610_GPW.pdf
+FW20M2720,FW20M2720,FUTURE,WIG20,2027-06-18,PLN,20,,,https://www.gpw.pl/pub/GPW/statystyki/statystyki_miesieczne/202610_GPW.pdf
+FW20U2720,FW20U2720,FUTURE,WIG20,2027-09-17,PLN,20,,,https://www.gpw.pl/pub/GPW/statystyki/statystyki_miesieczne/202610_GPW.pdf
+OW20L263900,OW20L263900,OPTION,WIG20,2026-12-18,PLN,10,3900,CALL,https://www.kdpw.pl/uploads/documents/isin/komunikat-nr-18-grudzien-2025-opcje-i-kontrakty.pdf
+OW20L263950,OW20L263950,OPTION,WIG20,2026-12-18,PLN,10,3950,CALL,https://www.kdpw.pl/uploads/documents/isin/komunikat-nr-18-grudzien-2025-opcje-i-kontrakty.pdf
+OW20L264000,OW20L264000,OPTION,WIG20,2026-12-18,PLN,10,4000,CALL,https://www.kdpw.pl/uploads/documents/isin/komunikat-nr-18-grudzien-2025-opcje-i-kontrakty.pdf
+OW20L264050,OW20L264050,OPTION,WIG20,2026-12-18,PLN,10,4050,CALL,https://www.kdpw.pl/uploads/documents/isin/komunikat-nr-18-grudzien-2025-opcje-i-kontrakty.pdf
+OW20L264100,OW20L264100,OPTION,WIG20,2026-12-18,PLN,10,4100,CALL,https://www.kdpw.pl/uploads/documents/isin/komunikat-nr-18-grudzien-2025-opcje-i-kontrakty.pdf
+OW20X263900,OW20X263900,OPTION,WIG20,2026-12-18,PLN,10,3900,PUT,https://www.kdpw.pl/uploads/documents/isin/komunikat-nr-18-grudzien-2025-opcje-i-kontrakty.pdf
+OW20X263950,OW20X263950,OPTION,WIG20,2026-12-18,PLN,10,3950,PUT,https://www.kdpw.pl/uploads/documents/isin/komunikat-nr-18-grudzien-2025-opcje-i-kontrakty.pdf
+OW20X264000,OW20X264000,OPTION,WIG20,2026-12-18,PLN,10,4000,PUT,https://www.kdpw.pl/uploads/documents/isin/komunikat-nr-18-grudzien-2025-opcje-i-kontrakty.pdf
+OW20X264050,OW20X264050,OPTION,WIG20,2026-12-18,PLN,10,4050,PUT,https://www.kdpw.pl/uploads/documents/isin/komunikat-nr-18-grudzien-2025-opcje-i-kontrakty.pdf
+OW20X264100,OW20X264100,OPTION,WIG20,2026-12-18,PLN,10,4100,PUT,https://www.kdpw.pl/uploads/documents/isin/komunikat-nr-18-grudzien-2025-opcje-i-kontrakty.pdf

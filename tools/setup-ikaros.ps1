@@ -4,14 +4,23 @@ function RunChecked([string]$Program, [string[]]$Arguments) {
     & $Program @Arguments
     if ($LASTEXITCODE -ne 0) { throw "$Program failed with exit code $LASTEXITCODE" }
 }
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw 'uv is not installed or not in PATH.' }
-if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw 'Docker CLI not found; install/start Docker Desktop.' }
-foreach ($file in @('compose.kafka.yaml','config/database.yaml','run/kafka_inbound_topics.py','run/kafka_discovery_topic.py','run/ikaros_scheduler.py')) {
-    if (-not (Test-Path $file)) { throw "Missing $file. Apply the Ikaros scheduler extension first." }
+try {
+    if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+        if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+            throw 'Install uv from https://docs.astral.sh/uv/getting-started/installation/ and double-click setup-ikaros.cmd again.'
+        }
+        Write-Host 'Installing uv using Windows Package Manager. Approve prompts if asked.'
+        RunChecked 'winget' @('install','--id','astral-sh.uv','--exact','--source','winget')
+        $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User') + ';' + $env:Path
+        if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+            throw 'uv installation finished. Close this window and double-click setup-ikaros.cmd again so Windows reloads PATH.'
+        }
+    }
+    RunChecked 'uv' @('sync','--locked','--python','3.12')
+    RunChecked 'uv' @('run','--no-sync','python','-m','run.prepare_daedalus')
+    Write-Host 'Local WIG20 checks passed. You can now prepare Daedalus.' -ForegroundColor Green
+    exit 0
+} catch {
+    Write-Host "Setup incomplete: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
 }
-RunChecked 'uv' @('sync','--python','3.12','--extra','kafka','--extra','snowflake')
-RunChecked 'docker' @('info','--format','{{.ServerVersion}}')
-RunChecked 'docker' @('compose','-f','compose.kafka.yaml','up','-d')
-RunChecked 'uv' @('run','--extra','kafka','python','-m','run.kafka_inbound_topics')
-RunChecked 'uv' @('run','--extra','kafka','python','-m','run.kafka_discovery_topic')
-Write-Host 'Ikaros setup OK. Seed instrument reference data if this is a new Snowflake database, then use start-ikaros.cmd.' -ForegroundColor Green
