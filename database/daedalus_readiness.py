@@ -33,8 +33,15 @@ def live_contracts(*, connection: Any, target: date) -> list[tuple[Any, ...]]:
     ).fetchall()
 
 
-def check(*, connection: Any, target: date, recent_sessions: tuple[date, ...],
-          lookback: int = 252, futures_count: int = 3, options_count: int = 20) -> list[str]:
+def check(
+    *,
+    connection: Any,
+    target: date,
+    recent_sessions: tuple[date, ...],
+    lookback: int = 252,
+    futures_count: int = 3,
+    options_count: int = 20,
+) -> list[str]:
     problems = []
     members = connection.execute(
         'SELECT "SECURITY_SYMBOL" FROM "INDEX_CONSTITUENTS" WHERE "INDEX_SYMBOL"=? '
@@ -49,13 +56,17 @@ def check(*, connection: Any, target: date, recent_sessions: tuple[date, ...],
     if len(index_dates) < lookback:
         problems.append(f"WIG20: {len(index_dates)}/{lookback} historical sessions")
     for dataset, symbol in [("WIG20", "WIG20"), *(("GPW", s) for s in symbols)]:
-        dates = index_dates if dataset == "WIG20" else price_dates(
-            connection=connection, dataset=dataset, symbol=symbol, target=target
+        dates = (
+            index_dates
+            if dataset == "WIG20"
+            else price_dates(connection=connection, dataset=dataset, symbol=symbol, target=target)
         )
         missing = sorted(required - dates)
         if len(dates) < lookback or missing:
-            problems.append(f"{symbol}: {len(dates)} closes, {len(missing)} missing required sessions"
-                            + (f" (latest missing {missing[-1]})" if missing else ""))
+            problems.append(
+                f"{symbol}: {len(dates)} closes, {len(missing)} missing required sessions"
+                + (f" (latest missing {missing[-1]})" if missing else "")
+            )
     for symbol in ("EURPLN=X", "USDPLN=X"):
         dates = price_dates(connection=connection, dataset="FX", symbol=symbol, target=target)
         if not dates or max(dates) < recent_sessions[-min(3, len(recent_sessions))]:
@@ -68,19 +79,34 @@ def check(*, connection: Any, target: date, recent_sessions: tuple[date, ...],
     for row in futures[:futures_count]:
         if row[3] != 20:
             problems.append(f"Future {row[0]}: missing or incorrect multiplier")
-        dates = price_dates(connection=connection, dataset="DERIVATIVES", symbol=row[0], target=target)
+        dates = price_dates(
+            connection=connection, dataset="DERIVATIVES", symbol=row[0], target=target
+        )
         if target not in dates:
             problems.append(f"Future {row[0]}: no close on {target}")
-    options = [r for r in contracts if r[1] == "OPTION" and r[3] == 10
-               and r[4] is not None and r[5] in ("CALL", "PUT")]
-    available = [r for r in options if len(price_dates(connection=connection, dataset="DERIVATIVES",
-                 symbol=r[0], target=target)) >= 4]
+    options = [
+        r
+        for r in contracts
+        if r[1] == "OPTION" and r[3] == 10 and r[4] is not None and r[5] in ("CALL", "PUT")
+    ]
+    available = [
+        r
+        for r in options
+        if len(
+            price_dates(connection=connection, dataset="DERIVATIVES", symbol=r[0], target=target)
+        )
+        >= 4
+    ]
     if not available:
         problems.append("Options: no live contract with four real historical closes")
-    print(f"Options: {len(available)} with >=4 closes / {len(options)} registered; "
-          f"Daedalus requests up to {options_count}")
+    print(
+        f"Options: {len(available)} with >=4 closes / {len(options)} registered; "
+        f"Daedalus requests up to {options_count}"
+    )
     if len(available) < options_count:
-        print("WARNING: fewer options with price history than requested; Daedalus may select fewer.")
+        print(
+            "WARNING: fewer options with price history than requested; Daedalus may select fewer."
+        )
     return problems
 
 

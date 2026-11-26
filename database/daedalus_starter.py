@@ -38,7 +38,9 @@ def seed(*, connection: Any, project_root: Path, target: date) -> tuple[str, ...
         "wig20_gpw_verified_contracts_2026_10.csv",
         "wig20_gpw_verified_options_extra.csv",
     ):
-        contracts.extend(validate_contracts(rows=read_csv(path=data / name, fields=CONTRACT_FIELDS)))
+        contracts.extend(
+            validate_contracts(rows=read_csv(path=data / name, fields=CONTRACT_FIELDS))
+        )
     ensure_reference_schema(connection)
     connection.execute("BEGIN")
     try:
@@ -56,15 +58,22 @@ def seed(*, connection: Any, project_root: Path, target: date) -> tuple[str, ...
                 cur.execute(
                     'INSERT INTO "PROVIDER_SYMBOLS" ("PROVIDER_SYMBOL_ID", "ASSET_ID", '
                     '"PROVIDER_ID", "PROVIDER_SYMBOL", "VALID_FROM", "VALID_TO") '
-                    'VALUES (?,?,?,?,?,?)',
-                    (identifier, mapping.asset_id, existing_providers[mapping.provider_code],
-                     mapping.provider_symbol, mapping.valid_from, mapping.valid_to),
+                    "VALUES (?,?,?,?,?,?)",
+                    (
+                        identifier,
+                        mapping.asset_id,
+                        existing_providers[mapping.provider_code],
+                        mapping.provider_symbol,
+                        mapping.valid_from,
+                        mapping.valid_to,
+                    ),
                 )
         # An independently imported snapshot at the same effective date is
         # accepted only if its actual constituents/weights match the bundle.
         existing = connection.execute(
             'SELECT "SECURITY_SYMBOL", "WEIGHT" FROM "INDEX_CONSTITUENTS" '
-            'WHERE "INDEX_SYMBOL"=? AND "VALID_FROM"=?', ("WIG20", snapshot)
+            'WHERE "INDEX_SYMBOL"=? AND "VALID_FROM"=?',
+            ("WIG20", snapshot),
         ).fetchall()
         if existing:
             from decimal import Decimal
@@ -72,7 +81,9 @@ def seed(*, connection: Any, project_root: Path, target: date) -> tuple[str, ...
             actual = sorted((str(s), Decimal(str(w))) for s, w in existing)
             expected = sorted((x["symbol"], x["weight"]) for x in weights)
             if actual != expected:
-                raise ValueError(f"Existing WIG20 snapshot at {snapshot} conflicts with starter data")
+                raise ValueError(
+                    f"Existing WIG20 snapshot at {snapshot} conflicts with starter data"
+                )
         else:
             store_weights(connection=connection, as_of=snapshot, items=weights)
         store_contracts(connection=connection, items=contracts)

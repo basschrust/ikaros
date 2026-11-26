@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from run.prepare_daedalus import default_market_dir, report
+from run.prepare_daedalus import default_market_dir, missing_ranges, report
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -24,9 +24,7 @@ def test_bundled_snapshot() -> None:
     stocks = records("gpw_stocks.wig20.csv")
     assert len(weights) == len(stocks) == 20
     assert sum(Decimal(row["weight_pct"]) for row in weights) == 100
-    assert {row["security_symbol"] for row in weights} == {
-        row["ticker"] + ".WA" for row in stocks
-    }
+    assert {row["security_symbol"] for row in weights} == {row["ticker"] + ".WA" for row in stocks}
     assert {row["as_of"] for row in weights} == {"2026-09-21"}
     assert {row["security_symbol"] for row in weights} >= {"PZU.WA", "EBP.WA", "MDV.WA"}
     assert {row["canonical_symbol"] for row in records("provider_symbols_gpw_wig20.csv")} == {
@@ -92,3 +90,26 @@ def test_reference_seed_idempotent_in_real_duckdb(tmp_path: Path) -> None:
         problems = check(connection=conn, target=target, recent_sessions=(target,))
         assert problems
         assert any("historical sessions" in item for item in problems)
+
+
+def test_mdv_biznesradar_mapping_covers_rename_without_overlap() -> None:
+    mappings = [
+        row
+        for row in records("provider_symbols_gpw_wig20.csv")
+        if row["canonical_symbol"] == "MDV.WA" and row["provider_code"] == "BIZNESRADAR"
+    ]
+    assert len(mappings) == 2
+    assert mappings[0]["provider_symbol"] == mappings[1]["provider_symbol"] == "MDV"
+    assert mappings[0]["valid_from"] == "2026-02-19"
+    assert mappings[0]["valid_to"] == "2026-09-20"
+    assert mappings[1]["valid_from"] == "2026-09-21"
+    assert mappings[1]["valid_to"] == ""
+
+
+def test_missing_ranges_targets_only_gaps() -> None:
+    day = date(2026, 2, 19)
+    assert missing_ranges(missing=set()) == []
+    assert missing_ranges(missing={day}) == [(day, day)]
+    assert missing_ranges(
+        missing={day, date(2026, 2, 20), date(2026, 2, 23), date(2026, 11, 25)}
+    ) == [(day, date(2026, 2, 23)), (date(2026, 11, 25), date(2026, 11, 25))]
