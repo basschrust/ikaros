@@ -11,12 +11,17 @@ from pathlib import Path
 import re
 from urllib.parse import unquote, urlsplit
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 from requests import Session
-from snowflake.connector import SnowflakeConnection
 
 import pandas as pd
 
 from providers.derivatives.biznesradar import parse_history_html
+
+# Snowflake is optional for local DuckDB users. This name is only a type hint:
+# the candidate-first source adapter uses collect() without connecting to it.
+if TYPE_CHECKING:
+    from snowflake.connector import SnowflakeConnection
 
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9]{3,24}$")
 SOURCE = "biznesradar|html_history"
