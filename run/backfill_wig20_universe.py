@@ -39,6 +39,12 @@ def main(*, argv: list[str] | None = None) -> int:
 
     import requests
     from config.config import PROJECT_ROOT, load_config
+    from database.coverage_identity import (
+        COVERAGE_FIELDS,
+        derivative_identities,
+        index_identity,
+        stock_identities,
+    )
     from database.daedalus_readiness import live_contracts, price_dates
     from database.daedalus_starter import seed
     from database.local_bootstrap import bootstrap
@@ -146,10 +152,23 @@ def main(*, argv: list[str] | None = None) -> int:
             seed_mappings(conn, backend="duckdb", write=True)
             # Include already reviewed unexpired contracts absent from either current listing.
             # Do not silently drop them; identify them in the report.
-            registry = {
+            registry_all = {
                 str(row[0]): row
                 for row in live_contracts(connection=conn, target=as_of)
                 if row[1] in {"FUTURE", "OPTION"}
+            }
+            # This runner is GPW-specific. Do not silently include foreign
+            # derivatives merely because their underlying is also WIG20.
+            all_metadata = derivative_identities(connection=conn, symbols=tuple(registry_all))
+            foreign_venues = {
+                symbol: identity.venue
+                for symbol, identity in all_metadata.items()
+                if identity.venue not in (None, "GPW")
+            }
+            if foreign_venues:
+                print(f"Excluded non-GPW WIG20 contracts: {foreign_venues}")
+            registry = {
+                symbol: row for symbol, row in registry_all.items() if symbol not in foreign_venues
             }
             discovered = {item.symbol: item for item in contracts}
             live = sorted(set(registry) | set(discovered))
@@ -211,17 +230,24 @@ def main(*, argv: list[str] | None = None) -> int:
         no_history = []
         rejected_all = []
         bankier_without_history = []
+        missing_derivative_venues: list[str] = []
         with repository_from_config(settings) as repo:
             conn = repo.connection
+            stock_metadata = stock_identities(connection=conn, symbols=symbols)
+            derivative_metadata = derivative_identities(connection=conn, symbols=live)
             coverage = []
             for dataset, symbol in [("WIG20", "WIG20"), *(("GPW", s) for s in symbols)]:
+                identity = (
+                    index_identity(symbol=symbol) if dataset == "WIG20" else stock_metadata[symbol]
+                )
                 dates = price_dates(connection=conn, dataset=dataset, symbol=symbol, target=target)
                 missing = sorted(required - dates)
                 if missing:
                     missing_equities[symbol] = [d.isoformat() for d in missing]
                 coverage.append(
                     {
-                        "dataset": dataset,
+                        "venue": identity.venue or "",
+                        "instrument_type": identity.instrument_type,
                         "symbol": symbol,
                         "accepted_sessions": len(dates & required),
                         "missing_sessions": len(missing),
@@ -238,8 +264,10 @@ def main(*, argv: list[str] | None = None) -> int:
                     )
                     if d >= args.start
                 }
-                kind = str(registry[symbol][1]) if symbol in registry else discovered[symbol].kind
-                if kind == "FUTURE" and target not in dates:
+                identity = derivative_metadata[symbol]
+                if identity.venue is None:
+                    missing_derivative_venues.append(symbol)
+                if identity.instrument_type == "FUTURE" and target not in dates:
                     missing_futures.append(symbol)
                 if not dates:
                     no_history.append(symbol)
@@ -260,7 +288,8 @@ def main(*, argv: list[str] | None = None) -> int:
                 )
                 coverage.append(
                     {
-                        "dataset": kind,
+                        "venue": identity.venue or "",
+                        "instrument_type": identity.instrument_type,
                         "symbol": symbol,
                         "accepted_sessions": len(dates),
                         "missing_sessions": "",
@@ -278,19 +307,7 @@ def main(*, argv: list[str] | None = None) -> int:
                         "source_errors": errors.get(symbol, ""),
                     }
                 )
-        fields = [
-            "dataset",
-            "symbol",
-            "accepted_sessions",
-            "missing_sessions",
-            "first",
-            "last",
-            "status",
-            "listing",
-            "source_observations",
-            "rejections",
-            "source_errors",
-        ]
+        fields = list(COVERAGE_FIELDS)
         with (report_dir / "coverage.csv").open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=fields)
             writer.writeheader()
@@ -302,6 +319,7 @@ def main(*, argv: list[str] | None = None) -> int:
             "listed_futures": len(futures),
             "listed_options": len(options),
             "registry_only": sorted(set(live) - set(discovered)),
+            "excluded_non_gpw_contracts": foreign_venues,
             "listing_issues": listing_issues,
             "missing_equity_sessions": missing_equities,
             "futures_without_target_close": missing_futures,
@@ -309,13 +327,14 @@ def main(*, argv: list[str] | None = None) -> int:
             "derivatives_without_accepted_history": no_history,
             "derivatives_with_source_rows_but_no_accepted_history": rejected_all,
             "bankier_listed_without_accepted_history": bankier_without_history,
+            "contracts_missing_venue": missing_derivative_venues,
             "promotion_conflicts": promotion_issues,
             "equity_worker_status": equity_status,
         }
         (report_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
         print(f"Coverage report: {report_dir / 'coverage.csv'}")
         print(
-            f"Missing equity/index sessions: {sum(map(len, missing_equities.values()))}; derivative source errors: {len(errors)}; derivatives without accepted history: {len(no_history)}"
+            f"Missing equity/index sessions: {sum(map(len, missing_equities.values()))}; derivative source errors: {len(errors)}; derivatives without accepted history: {len(no_history)}; contracts missing venue: {len(missing_derivative_venues)}"
         )
         incomplete = bool(
             listing_issues
@@ -326,6 +345,7 @@ def main(*, argv: list[str] | None = None) -> int:
             or equity_status
             or rejected_all
             or bankier_without_history
+            or missing_derivative_venues
         )
         print(
             "INCOMPLETE: inspect summary.json"

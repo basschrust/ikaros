@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from database.candidate_observations import ensure_schema as ensure_fx_rate_candidates
+from database.daedalus_reference import ensure_reference_schema
 from database.duckdb_compat import CompatibleConnection
 from database.duckdb_storage import Repository
 from database.market_quote_schema import ensure_market_quote_schema
@@ -44,8 +45,11 @@ class LocalDuckDBRepository(Repository):
                "CONTRACT_ID" VARCHAR PRIMARY KEY,
                "INSTRUMENT_TYPE" VARCHAR NOT NULL,
                "UNDERLYING_SYMBOL" VARCHAR,
-               "EXPIRY_DATE" DATE NOT NULL)"""
+               "EXPIRY_DATE" DATE NOT NULL,
+               "VENUE" VARCHAR)"""
         )
+        # Applies an additive migration for existing 4-column registries too.
+        ensure_reference_schema(self.connection)
         ensure_market_quote_schema(self.connection, backend="duckdb")
         ensure_fx_rate_candidates(self.connection, backend="duckdb")
 

@@ -11,7 +11,8 @@ import pytest
 from run.setup_local_duckdb import resolve_contracts_csv
 
 
-HEADER = ["contract_id", "instrument_type", "underlying_symbol", "expiry_date"]
+LEGACY_HEADER = ["contract_id", "instrument_type", "underlying_symbol", "expiry_date"]
+VENUE_HEADER = ["contract_id", "venue", "instrument_type", "underlying_symbol", "expiry_date"]
 
 
 def test_manifest_is_optional_on_first_boot(tmp_path: Path) -> None:
@@ -21,13 +22,13 @@ def test_manifest_is_optional_on_first_boot(tmp_path: Path) -> None:
 def test_standard_manifest_is_detected_without_extra_flags(tmp_path: Path) -> None:
     location = tmp_path / "data" / "derivative_contracts.csv"
     location.parent.mkdir()
-    location.write_text(",".join(HEADER) + "\nFW20Z2620,FUTURE,WIG20,2026-12-18\n")
+    location.write_text(",".join(LEGACY_HEADER) + "\nFW20Z2620,FUTURE,WIG20,2026-12-18\n")
     assert resolve_contracts_csv(project_root=tmp_path, requested=None) == location
 
 
 def test_explicit_override_and_missing_path(tmp_path: Path) -> None:
     custom = tmp_path / "contracts.csv"
-    custom.write_text(",".join(HEADER) + "\n")
+    custom.write_text(",".join(LEGACY_HEADER) + "\n")
     assert resolve_contracts_csv(project_root=tmp_path, requested=Path("contracts.csv")) == custom
     with pytest.raises(FileNotFoundError, match="Contract manifest not found"):
         resolve_contracts_csv(project_root=tmp_path, requested=Path("missing.csv"))
@@ -39,7 +40,8 @@ def test_example_is_reviewable_not_automatically_loaded() -> None:
     with example.open(newline="", encoding="utf-8") as source:
         rows = list(csv.DictReader(source))
     assert len(rows) >= 2
-    assert set(rows[0]) == set(HEADER)
+    assert set(rows[0]) == set(VENUE_HEADER)
+    assert {r["venue"] for r in rows} == {"GPW"}
     assert {r["instrument_type"] for r in rows} == {"FUTURE", "OPTION"}
     assert len({r["contract_id"] for r in rows}) == len(rows)
     for row in rows:
@@ -70,7 +72,7 @@ def test_setup_passes_auto_detected_csv_into_bootstrap(
     root = tmp_path
     manifest = root / "data" / "derivative_contracts.csv"
     manifest.parent.mkdir()
-    manifest.write_text(",".join(HEADER) + "\nFW20Z2620,FUTURE,WIG20,2026-12-18\n")
+    manifest.write_text(",".join(LEGACY_HEADER) + "\nFW20Z2620,FUTURE,WIG20,2026-12-18\n")
 
     configuration = ModuleType("config.config")
     configuration.PROJECT_ROOT = root

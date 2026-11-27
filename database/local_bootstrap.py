@@ -213,33 +213,58 @@ def _add_gpw_yahoo_mappings(conn: Any, *, provider_id: int) -> int:
 
 
 def _add_contracts(conn: Any, *, path: Path | None) -> int:
+    """Register legacy or venue-aware CSVs; never assume venue if omitted.
+
+    Existing 4-column user CSVs remain accepted. Their missing VENUE is NULL,
+    *not* GPW, until an independently reviewed import fills it.
+    """
     if path is None:
         return 0
     present = {
-        str(row[0]): (str(row[1]), str(row[2]), str(row[3])[:10])
-        for row in _rows(
+        str(cid): (str(kind), str(underlying), str(expiry)[:10], venue)
+        for cid, kind, underlying, expiry, venue in _rows(
             conn,
-            'SELECT "CONTRACT_ID","INSTRUMENT_TYPE","UNDERLYING_SYMBOL","EXPIRY_DATE" FROM "DERIVATIVE_CONTRACTS"',
+            'SELECT "CONTRACT_ID","INSTRUMENT_TYPE","UNDERLYING_SYMBOL",'
+            '"EXPIRY_DATE","VENUE" FROM "DERIVATIVE_CONTRACTS"',
         )
     }
     created = 0
     for item in _csv(path):
-        symbol = item["contract_id"]
-        kind = item["instrument_type"].upper()
-        underlying = item["underlying_symbol"]
+        symbol = item["contract_id"].strip().upper()
+        kind = item["instrument_type"].strip().upper()
+        underlying = item["underlying_symbol"].strip().upper()
         expiry = item["expiry_date"]
+        venue = item.get("venue", "").strip().upper() or None
         if kind not in ("FUTURE", "OPTION"):
             raise ValueError(f"Invalid contract type {kind!r}")
+        if venue is not None and not venue.replace("_", "").isalnum():
+            raise ValueError(f"Invalid venue for {symbol}: {venue!r}")
         if symbol in present:
-            if present[symbol] != (kind, underlying, expiry):
+            original = present[symbol]
+            if original[:3] != (kind, underlying, expiry):
                 raise ValueError(f"Conflicting derivative metadata for {symbol}")
+            old_venue = original[3]
+            if old_venue is not None and venue is not None and str(old_venue).upper() != venue:
+                raise ValueError(
+                    f"Conflicting derivative venue for {symbol}: {old_venue!r} vs {venue!r}"
+                )
+            if old_venue is None and venue is not None:
+                _insert(
+                    conn,
+                    'UPDATE "DERIVATIVE_CONTRACTS" SET "VENUE"=? WHERE "CONTRACT_ID"=?',
+                    (venue, symbol),
+                )
+                present[symbol] = (*original[:3], venue)
             continue
         _insert(
             conn,
-            'INSERT INTO "DERIVATIVE_CONTRACTS" ("CONTRACT_ID","INSTRUMENT_TYPE","UNDERLYING_SYMBOL","EXPIRY_DATE") VALUES (?,?,?,CAST(? AS DATE))',
-            (symbol, kind, underlying, expiry),
+            'INSERT INTO "DERIVATIVE_CONTRACTS" '
+            '("CONTRACT_ID","INSTRUMENT_TYPE","UNDERLYING_SYMBOL","EXPIRY_DATE","VENUE") '
+            "VALUES (?,?,?,CAST(? AS DATE),?)",
+            (symbol, kind, underlying, expiry, venue),
         )
         created += 1
+        present[symbol] = (kind, underlying, expiry, venue)
     return created
 
 
