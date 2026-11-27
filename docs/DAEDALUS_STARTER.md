@@ -13,7 +13,7 @@ Maintain these inputs with new dated snapshots and exact verified contracts befo
 
 This package targets the default WIG20 scenario. It does not create calibration IDs or ensure every listed option trades. The local check requires 252 closes and alignment to the index plus the most recent 20 published GPW sessions, three futures with latest-session closes, two recent FX quotes and at least one usable option. Fewer than 20 usable options is printed as a warning, matching the existing Daedalus local validation minimum of one option with four sessions. Daedalus still owns final validation. The existing GPW calendar helper supports 2026/2027 only; maintainers must extend it before a new year is needed. The 450-day download may span 2025; the historical checks use observed index sessions, not an invented calendar for 2025.
 
-The merged master also has a test for a private PZU repair CSV (`data/pzu_verified_gap_2026_10_14_to_11_20.csv`), which was not present in the GitHub tree. This package does not invent the missing historical rows. Restore the verified original fixture separately if needed for that test.
+The PZU regression fixture has been restored under `tests/fixtures/` from the original historical source. It is not a production backfill input.
 
 ## MDV ticker transition and historical repair
 

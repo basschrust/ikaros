@@ -62,6 +62,58 @@ Ikaros checks data coverage; Daedalus performs the final scenario and calibratio
 
 The snapshot and derivative manifest are **dated**, not a perpetual live listing. When the index changes or contracts expire, maintainers must publish refreshed, reviewed reference inputs or import them using `run.import_local_daedalus_inputs`. The readiness command reports missing live derivatives; it does not manufacture replacement contracts. See [starter reference provenance](docs/DAEDALUS_STARTER.md).
 
+## Full local WIG20 historical universe (research backfill)
+
+The starter above is intentionally small. For a broader local research dataset,
+activate the `Ikaros` environment and run from the project root:
+
+```powershell
+python -m run.backfill_wig20_universe --write
+```
+
+This targets the 20 constituents in the current reviewed WIG20 snapshot, the WIG20
+index and all exact unexpired WIG20 derivative symbols discovered in the live
+BiznesRadar and Bankier listings, plus already-registered unexpired WIG20 series.
+The default range starts on 2025-01-01 and ends on the most recent completed GPW
+session. No FX, rates, Snowflake or Kafka are required for this command.
+
+```powershell
+# Discover only: no database changes
+python -m run.backfill_wig20_universe
+# Register discovered metadata only, without price downloads
+python -m run.backfill_wig20_universe --inventory-only --write
+# Explicit range (must be covered by config/calendars.yaml)
+python -m run.backfill_wig20_universe --start 2025-01-01 --through 2026-11-26 --write
+```
+
+The existing `.env` and accepted observations are preserved. The equity/index
+backfill targets only missing sessions according to the maintained GPW calendar.
+For historical repair it extends the already reviewed alternate equity archive
+aliases without changing existing mapping IDs; the MDV and EBP ticker changes are
+not backdated. Existing Yahoo history can cover the older ticker periods; gaps are
+reported. Each derivative is queried for the whole requested period once per run,
+not once per 60-day window. Illiquid options need not have daily trades.
+Contract identifiers come from actual listing rows; strike, call/put, multiplier
+and standard expiry are derived from published contract rules, and incompatible
+reported expiry dates are rejected. This is **standard-derived metadata**, not an
+independent official KDPW confirmation of each series or guarantee of an exhaustive
+exchange roster. Already reviewed conflicting metadata is never overwritten.
+
+Results are written under `output/wig20_history/`:
+
+- `discovered_contracts.csv`: exact listed symbols, terms and source evidence;
+- `coverage.csv`: price coverage per instrument, derivative candidate rejection reasons
+  and source errors;
+- `summary.json`: missing equity/index sessions, futures lacking a target-session
+  close, derivative source errors and contracts without accepted history.
+
+A successful source query with no rows is distinct from an access error or rejected
+prices. No observations are fabricated. Nonzero exit means unresolved issues; the
+accepted observations remain in DuckDB. Re-running targets equity gaps again but
+re-queries the derivative history (sparse trades cannot be inferred from dates alone).
+The inventory is the current basket and current derivative series, not historical
+point-in-time WIG20 constituent membership or contracts that expired before discovery.
+
 ## Other markets and advanced workflows
 
 For extra GPW/foreign equity universes, place reviewed CSV files in `data/` (e.g. `gpw_stocks.csv`, `us_sp500.csv`, `europe_pse.csv`) and run `python -m run.setup_local_duckdb --write`. Personal files remain ignored by Git. To register extra derivatives, use the reviewed manifest format in `data/derivative_contracts.example.csv` or the full metadata importer.

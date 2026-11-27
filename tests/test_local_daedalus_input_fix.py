@@ -37,7 +37,6 @@ class InMemorySql:
         if "information_schema.columns" in sql:
             return self.db.execute('SELECT name FROM pragma_table_info("DERIVATIVE_CONTRACTS")')
         # SQLite 3.12+ deprecates its implicit datetime.date adapter.
-        # Bind dates and decimals explicitly, without mutating process-wide adapters.
         adapted = tuple(
             value.isoformat()
             if isinstance(value, date)
@@ -122,7 +121,7 @@ def test_additive_ddl_and_reference_insert() -> None:
 
 
 def test_verified_pzu_history() -> None:
-    rows = parse_history(path=ROOT / "data/pzu_verified_gap_2026_10_14_to_11_20.csv")
+    rows = parse_history(path=ROOT / "tests/fixtures/pzu_verified_gap_2026_10_14_to_11_20.csv")
     assert len(rows) == 27
     assert rows[0][0] == date(2026, 10, 14)
     assert rows[-1] == (
