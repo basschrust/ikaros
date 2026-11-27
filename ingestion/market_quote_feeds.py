@@ -109,7 +109,9 @@ def parse_index_history(html: str, symbol: str) -> list[MarketCandle]:
 class BiznesRadarIndexFeed:
     code: str = "BIZNESRADAR"
     session: requests.Session | None = None
-    max_pages: int = 10
+    # The previously hardcoded 10-page limit excluded WIG20 history before
+    # late 2024. Keep a finite bound and report when it is insufficient.
+    max_pages: int = 60
 
     def history(self, symbol: str, start: date, end: date) -> list[MarketCandle]:
         if symbol != "WIG20":
@@ -134,7 +136,11 @@ class BiznesRadarIndexFeed:
                 raise ValueError("Nonadvancing BiznesRadar index pagination")
             old = oldest
         else:
-            raise ValueError("Index history exceeded max_pages")
+            raise ValueError(
+                f"BiznesRadar WIG20 history did not reach {start} after "
+                f"{self.max_pages} pages (oldest fetched session: {old}). "
+                "Use a verified deeper archive or increase the bounded page limit."
+            )
         if not found:
             raise ValueError("No BiznesRadar WIG20 sessions in window")
         return sorted(found.values(), key=lambda x: x.day)
