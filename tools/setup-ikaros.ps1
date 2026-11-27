@@ -1,17 +1,66 @@
+param([switch]$EnvironmentOnly, [switch]$Developer)
 $ErrorActionPreference = 'Stop'
-Set-Location (Split-Path -Parent $PSScriptRoot)
+$root = Split-Path -Parent $PSScriptRoot
+Set-Location $root
+$env:UV_PROJECT_ENVIRONMENT = 'Ikaros'
+$python = Join-Path $root 'Ikaros\Scripts\python.exe'
+
 function RunChecked([string]$Program, [string[]]$Arguments) {
     & $Program @Arguments
     if ($LASTEXITCODE -ne 0) { throw "$Program failed with exit code $LASTEXITCODE" }
 }
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw 'uv is not installed or not in PATH.' }
-if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw 'Docker CLI not found; install/start Docker Desktop.' }
-foreach ($file in @('compose.kafka.yaml','config/database.yaml','run/kafka_inbound_topics.py','run/kafka_discovery_topic.py','run/ikaros_scheduler.py')) {
-    if (-not (Test-Path $file)) { throw "Missing $file. Apply the Ikaros scheduler extension first." }
+function Refresh-Path {
+    $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User') + ';' + $env:Path
+    $env:Path += ';' + (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links') + ';' + (Join-Path $HOME '.local\bin')
 }
-RunChecked 'uv' @('sync','--python','3.12','--extra','kafka','--extra','snowflake')
-RunChecked 'docker' @('info','--format','{{.ServerVersion}}')
-RunChecked 'docker' @('compose','-f','compose.kafka.yaml','up','-d')
-RunChecked 'uv' @('run','--extra','kafka','python','-m','run.kafka_inbound_topics')
-RunChecked 'uv' @('run','--extra','kafka','python','-m','run.kafka_discovery_topic')
-Write-Host 'Ikaros setup OK. Seed instrument reference data if this is a new Snowflake database, then use start-ikaros.cmd.' -ForegroundColor Green
+function Has-Distribution([string]$Pattern) {
+    foreach ($directory in @('Ikaros', '.venv')) {
+        $site = Join-Path $root "$directory\Lib\site-packages"
+        if (Test-Path -LiteralPath $site) {
+            if (Get-ChildItem -LiteralPath $site -Filter $Pattern -ErrorAction SilentlyContinue | Select-Object -First 1) {
+                return $true
+            }
+        }
+    }
+    return $false
+}
+try {
+    Refresh-Path
+    if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+        if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+            throw 'Install uv from https://docs.astral.sh/uv/getting-started/installation/ and rerun setup-ikaros.cmd.'
+        }
+        Write-Host 'Installing uv using Windows Package Manager. Approve prompts if asked.'
+        RunChecked 'winget' @('install','--id','astral-sh.uv','--exact','--source','winget')
+        Refresh-Path
+        if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+            throw 'uv installation finished but uv is not on PATH. Restart Windows Terminal or PyCharm and rerun setup.'
+        }
+    }
+    # Keep any optional connector extras already present in either environment.
+    # New local installations do not install cloud connectors by default.
+    $syncArgs = @('sync','--locked','--python','3.12','--inexact')
+    if ($Developer) {
+        $syncArgs += '--all-extras'
+    } else {
+        if (Has-Distribution 'snowflake_connector_python-*.dist-info') { $syncArgs += @('--extra','snowflake') }
+        if (Has-Distribution 'confluent_kafka-*.dist-info') { $syncArgs += @('--extra','kafka') }
+    }
+    Write-Host 'Preparing the Ikaros Python environment...'
+    if (-not (Test-Path -LiteralPath $python)) {
+        RunChecked 'uv' @('venv','--python','3.12','--prompt','Ikaros','Ikaros')
+    }
+    RunChecked 'uv' $syncArgs
+    RunChecked $python @('-c','import sys; print(sys.executable)')
+    Write-Host 'Ikaros environment ready.' -ForegroundColor Green
+    if (Test-Path -LiteralPath (Join-Path $root '.venv')) {
+        Write-Host 'Old .venv retained. Select Ikaros\Scripts\python.exe in PyCharm before removing it.'
+    }
+    if ($EnvironmentOnly) { exit 0 }
+    RunChecked $python @('-m','run.prepare_daedalus')
+    Write-Host 'Local WIG20 checks passed. You can now prepare Daedalus.' -ForegroundColor Green
+    exit 0
+} catch {
+    Write-Host "Setup incomplete: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}

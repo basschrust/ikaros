@@ -1,23 +1,27 @@
+.PHONY: test test-verbose lint lint-check check format
 
-.PHONY: test test-verbose lint lint-check check
-
-UV ?= uv
+# Use the project environment directly: no activation or uv on PATH required.
+ifeq ($(OS),Windows_NT)
+PYTHON ?= Ikaros/Scripts/python.exe
+else
+PYTHON ?= Ikaros/bin/python
+endif
 
 test:
-	$(UV) run --no-sync python -m pytest -q tests
+	"$(PYTHON)" -m pytest -q tests
 
 test-verbose:
-	$(UV) run --no-sync python -m pytest -v tests
+	"$(PYTHON)" -m pytest -v tests
 
 lint-check:
-	$(UV) run --no-sync ruff check .
-	$(UV) run --no-sync ruff format --check .
+	"$(PYTHON)" -m ruff check .
+	"$(PYTHON)" -m ruff format --check .
 
 lint:
-	$(UV) run --no-sync ruff check --fix .
-	$(UV) run --no-sync ruff format .
+	"$(PYTHON)" -m ruff check --fix .
+	"$(PYTHON)" -m ruff format .
 
 check: lint-check test
 
 format:
-	$(UV) run --no-sync ruff format .
+	"$(PYTHON)" -m ruff format .

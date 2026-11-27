@@ -1,148 +1,153 @@
 # Ikaros 🪽
 
-**Market data for [Daedalus](https://github.com/basschrust/pymarketsim)** — retrieve, validate and store stock prices, WIG20, FX, official interest rates and registered GPW futures/options.
+**Market data for [Daedalus](https://github.com/basschrust/daedalus)**. Ikaros retrieves real observations, validates candidates and publishes accepted market data to a local DuckDB or optional Snowflake database.
 
-Ikaros can run on **one laptop, with DuckDB only**. A Snowflake account, Docker and Kafka are **not needed** for the simple historical and daily workflows.
+## Windows: start here
 
-## Quick start: five minutes to a local market database
+**No Snowflake, Docker, Kafka, Make or separate Python installation required.** You need internet access and Windows 10/11 with Windows Package Manager (winget) or an existing [uv installation](https://docs.astral.sh/uv/getting-started/installation/).
 
-Requirements: **Python 3.12**, [uv](https://docs.astral.sh/uv/), internet access for market-data providers. Commands below are for **PowerShell**, run from the Ikaros repository directory.
+1. Download Ikaros using GitHub's **Code → Download ZIP**, extract the folder, or clone it with Git. For automatic detection, put the Ikaros and Daedalus folders next to each other (names `ikaros` and `daedalus` or `pymarketsim`; GitHub ZIP names ending in `-master` or `-main` also work).
+2. Open the Ikaros folder and double-click **`setup-ikaros.cmd`**. Approve the uv installation if prompted. The launcher provisions Python 3.12 in the project-local `Ikaros/` environment, installs the locked dependencies, seeds the reviewed WIG20 reference data, downloads historical prices and checks coverage.
+3. When the window reports `LOCAL WIG20 CHECK PASSED`, run Daedalus's local source preparation. If it reports `NOT READY`, read the missing-data messages and double-click setup again after resolving the issue. No CSV editing or database GUI is needed for the bundled starter universe.
 
-```powershell
-git clone https://github.com/basschrust/ikaros.git
-cd ikaros
-uv sync --python 3.12
-Copy-Item .env.example .env
-uv run python -m run.setup_local_duckdb --write
-```
+First download can be substantial. Subsequent runs reuse accepted observations and target gaps. The same `setup-ikaros.cmd` (or `start-ikaros.cmd`) refreshes the database; it does not start Kafka. Do not run two copies simultaneously. Close DBeaver or other processes holding the database open first.
 
-The default `.env.example` selects DuckDB and puts `ikaros.duckdb` under `./output/market_data`. To use Ikaros directly as Daedalus's market-data source, edit `.env` and set:
+### Where is my database?
 
-```dotenv
-IKAROS_DB_DRIVER=duckdb
-IKAROS_MARKET_DATA_DIR=C:/path/to/Daedalus/input/market_data
-```
+On first use, if exactly one sibling Daedalus checkout is detected, Ikaros writes directly to `Daedalus/input/market_data/ikaros.duckdb`. Otherwise it writes to `output/market_data/ikaros.duckdb` inside Ikaros. The actual absolute path is printed and saved in `.env`. Existing `.env` settings are preserved. For a different location, edit `IKAROS_MARKET_DATA_DIR` in `.env` before running setup. Select the directory, not the database filename. Never commit `.env` or credentials.
 
-Use your actual Daedalus directory (forward slashes also work on Windows). The database file will be `<IKAROS_MARKET_DATA_DIR>/ikaros.duckdb`. Never commit `.env` or credentials.
+## PowerShell / command line alternative
 
-### Fetch market data
-
-For a small first import, choose a recent start date (example):
+From the Ikaros root, the launcher also works from PowerShell:
 
 ```powershell
-uv run python -m run.update_all --bootstrap-start 2026-11-16 --write
+.\setup-ikaros.cmd
 ```
 
-For a historical import **from 1 January 2025**, including already registered instruments with newer data:
+To create or update just the named Python environment without fetching market data:
 
 ```powershell
-uv run python -m run.backfill_local --write
+.\setup-ikaros.cmd -EnvironmentOnly
 ```
 
-The backfill may take time and provider calls can fail; it uses 60-day windows and separate candidate staging and promotion. Registered equity universes require local, reviewed CSVs (`data/gpw_stocks.csv`, `data/us_sp500.csv`, `data/europe_pse.csv`, etc.). If none are supplied, those venues are reported as skipped rather than populated with fabricated tickers.
+The launcher sets `UV_PROJECT_ENVIRONMENT=Ikaros` only for its own process. For manual uv commands in a new terminal, set `$env:UV_PROJECT_ENVIRONMENT = "Ikaros"` first. Do not set it globally for other projects. Activate the environment with `.\Ikaros\Scripts\Activate.ps1`, or run `.\Ikaros\Scripts\python.exe` directly if activation is blocked. The commands below assume activation.
 
-For ordinary daily incremental updates thereafter:
+Useful alternatives:
 
 ```powershell
-uv run python -m run.update_all --write
+# Check existing database without downloading or seeding
+python -m run.prepare_daedalus --check-only
+# Reference data only, no prices
+python -m run.prepare_daedalus --reference-only
+# Explicit earlier history
+python -m run.prepare_daedalus --start 2025-01-01
 ```
 
-This updates through **yesterday in Warsaw** by default, detects recent gaps for GPW/WIG20 and preserves existing accepted observations. To preview the plan, omit `--write`. To update just one domain, use `--datasets FX`, `--datasets GPW`, `--datasets WIG20`, `--datasets RATES` or `--datasets DERIVATIVES`.
+For an initial custom location, pass `--market-data-dir C:/projects/Daedalus/input/market_data`. Existing conflicting settings are rejected, not silently redirected.
 
-## GPW futures and options: one CSV, one setup command
-
-Unlike stocks, a derivative is a **specific contract with its own expiry**, not just an underlying symbol. Ikaros deliberately does not guess contract IDs or expiry dates. If `DERIVATIVE_CONTRACTS` is empty, the daily updater cannot fetch derivative prices.
-
-**1. Copy the reviewed example manifest:**
+In the current Daedalus checkout, use its own Python environment and local source option (see Daedalus README and CLI help):
 
 ```powershell
-Copy-Item data/derivative_contracts.example.csv data/derivative_contracts.csv
+python -m run.simulation_main --dataset wig20 --source duckdb --prepare-only
 ```
 
-The example contains two **verified November 2026** GPW symbols, both expiring on 18 December 2026:
+Ikaros checks data coverage; Daedalus performs the final scenario and calibration validation. Ikaros does not create risk calibrations or install Daedalus itself.
 
-```csv
-contract_id,instrument_type,underlying_symbol,expiry_date
-FW20Z2620,FUTURE,WIG20,2026-12-18
-OW20L264250,OPTION,WIG20,2026-12-18
-```
+## What the starter includes
 
-These are real examples, **not a live or automatically updated contract list**. Before using the file on another date, review and update the contract IDs and expiries using the [GPW exchange](https://www.gpw.pl/), [BiznesRadar futures](https://www.biznesradar.pl/gielda/pochodne_kontrakty,1,2) and [BiznesRadar options](https://www.biznesradar.pl/gielda/pochodne_opcje) listings. An option is a distinct row **for each listed strike, type and expiry**. For other underlyings, use their exact symbol as shown by the source. Do not invent contracts from a naming pattern.
+- 20 WIG20 constituents from the official GPW Benchmark quarterly adjustment effective for trading on 21 September 2026. Published percentage weights are based on 21 August 2026 data, not today's live weights.
+- Four explicitly listed WIG20 futures and 20 explicitly registered December 2026 WIG20 options, with expiry, multiplier, strike and option side; provenance in CSVs. A listed option need not have traded, and actual price availability can be lower than the requested 20.
+- EUR/PLN and USD/PLN market FX, plus the reference pairs/rate series already seeded by Ikaros.
+- Initial equity/index history starts 450 calendar days before the last completed GPW session by default, with a target of 252 common sessions. Derivative retrieval uses up to 60 recent calendar days. All actual prices follow the candidate-first stage/promote flow; none are bundled or invented.
 
-**2. Register the contracts and their provider aliases:**
+The snapshot and derivative manifest are **dated**, not a perpetual live listing. When the index changes or contracts expire, maintainers must publish refreshed, reviewed reference inputs or import them using `run.import_local_daedalus_inputs`. The readiness command reports missing live derivatives; it does not manufacture replacement contracts. See [starter reference provenance](docs/DAEDALUS_STARTER.md).
+
+## Full local WIG20 historical universe (research backfill)
+
+The starter above is intentionally small. For a broader local research dataset,
+activate the `Ikaros` environment and run from the project root:
 
 ```powershell
-uv run python -m run.setup_local_duckdb --write
+python -m run.backfill_wig20_universe --write
 ```
 
-`run.setup_local_duckdb` automatically finds `data/derivative_contracts.csv` when present. It creates the missing rows in `DERIVATIVE_CONTRACTS` and the corresponding `DERIVATIVE_PROVIDER_SYMBOLS` mappings for the existing BiznesRadar adapter. The command is **idempotent**: it does not overwrite historical prices or previously registered contract metadata. It refuses conflicting metadata. To use a different CSV filename, pass `--contracts-csv path/to/contracts.csv`.
-
-**3. Import derivative prices:**
+This targets the 20 constituents in the current reviewed WIG20 snapshot, the WIG20
+index and all exact unexpired WIG20 derivative symbols discovered in the live
+BiznesRadar and Bankier listings, plus already-registered unexpired WIG20 series.
+The default range starts on 2025-01-01 and ends on the most recent completed GPW
+session. No FX, rates, Snowflake or Kafka are required for this command.
 
 ```powershell
-uv run python -m run.update_all --datasets DERIVATIVES --write
+# Discover only: no database changes
+python -m run.backfill_wig20_universe
+# Register discovered metadata only, without price downloads
+python -m run.backfill_wig20_universe --inventory-only --write
+# Explicit range (must be covered by config/calendars.yaml)
+python -m run.backfill_wig20_universe --start 2025-01-01 --through 2026-11-26 --write
 ```
 
-The first daily import for a contract without existing prices checks a short recent window. For the complete history of **registered** contracts, including expired ones:
+The existing `.env` and accepted observations are preserved. The equity/index
+backfill targets only missing sessions according to the maintained GPW calendar.
+For historical repair it extends the already reviewed alternate equity archive
+aliases without changing existing mapping IDs; the MDV and EBP ticker changes are
+not backdated. Existing Yahoo history can cover the older ticker periods; gaps are
+reported. Each derivative is queried for the whole requested period once per run,
+not once per 60-day window. Illiquid options need not have daily trades.
+Contract identifiers come from actual listing rows; strike, call/put, multiplier
+and standard expiry are derived from published contract rules, and incompatible
+reported expiry dates are rejected. This is **standard-derived metadata**, not an
+independent official KDPW confirmation of each series or guarantee of an exhaustive
+exchange roster. Already reviewed conflicting metadata is never overwritten.
+
+Results are written under `output/wig20_history/`:
+
+- `discovered_contracts.csv`: exact listed symbols, terms and source evidence;
+- `coverage.csv`: price coverage per instrument, derivative candidate rejection reasons
+  and source errors;
+- `summary.json`: missing equity/index sessions, futures lacking a target-session
+  close, derivative source errors and contracts without accepted history.
+
+A successful source query with no rows is distinct from an access error or rejected
+prices. No observations are fabricated. Nonzero exit means unresolved issues; the
+accepted observations remain in DuckDB. Re-running targets equity gaps again but
+re-queries the derivative history (sparse trades cannot be inferred from dates alone).
+The inventory is the current basket and current derivative series, not historical
+point-in-time WIG20 constituent membership or contracts that expired before discovery.
+
+## Other markets and advanced workflows
+
+For extra GPW/foreign equity universes, place reviewed CSV files in `data/` (e.g. `gpw_stocks.csv`, `us_sp500.csv`, `europe_pse.csv`) and run `python -m run.setup_local_duckdb --write`. Personal files remain ignored by Git. To register extra derivatives, use the reviewed manifest format in `data/derivative_contracts.example.csv` or the full metadata importer.
 
 ```powershell
-uv run python -m run.backfill_local --datasets DERIVATIVES --write
+# Historical data for all registered instruments from 2025-01-01
+python -m run.backfill_local --write
+# Incremental update of all registered domains through yesterday in Warsaw
+python -m run.update_all --write
+# Preview either operation by omitting --write
 ```
 
-This preserves candidate-first ingestion: provider data → `DERIVATIVE_PRICE_CANDIDATES` → independent validation/promotion → `DERIVATIVE_PRICES`. It never invents settlement or open interest values. An option may have no actual trades during a window; an empty result need not be a software error. If BiznesRadar changes its pages, source errors will be reported rather than silently replaced with synthetic prices.
+These generic commands are separate from the targeted WIG20 starter. Data-provider outages, rate limits and gaps are reported; existing accepted observations are preserved. For derivative contract registration, use exact exchange-listed IDs and verified metadata. No prices are generated to fill missing observations.
 
-**Every time new series are listed**, append reviewed rows to `data/derivative_contracts.csv` and rerun the **same setup command**. The daily updater will then include those contracts. Ikaros does not automatically discover newly listed contracts in this simple local workflow.
+### Optional Snowflake and Kafka
 
-### What does the CSV mean?
+For Snowflake, after setting `UV_PROJECT_ENVIRONMENT` as above, install `uv sync --locked --inexact --extra snowflake`, set `IKAROS_DB_DRIVER=snowflake` in `.env`, configure credentials and `config/database.yaml`, and check `python -m run.check_snowflake_auth`. For Kafka install `uv sync --locked --inexact --extra kafka --extra snowflake` and use `python -m run.ikaros --help`, `setup`, `start` and `status` as appropriate. These cloud/live workflows require their own broker, credentials and reference data; they are not required for local simulations.
 
-| Column | Meaning |
-| --- | --- |
-| `contract_id` | Exact exchange/provider-listed symbol, e.g. `FW20Z2620` |
-| `instrument_type` | `FUTURE` or `OPTION` |
-| `underlying_symbol` | Underlying index or stock, e.g. `WIG20` |
-| `expiry_date` | Verified expiry, ISO format `YYYY-MM-DD` |
+## Development and migration from `.venv`
 
-### Check what was stored
-
-Connect to the file from `.env` using DuckDB, DBeaver or a compatible SQL client and run:
-
-```sql
-SELECT * FROM DERIVATIVE_CONTRACTS ORDER BY EXPIRY_DATE, CONTRACT_ID;
-SELECT * FROM DERIVATIVE_PROVIDER_SYMBOLS ORDER BY CONTRACT_ID;
-SELECT CONTRACT_ID, MIN(DATE) AS FIRST_DATE, MAX(DATE) AS LAST_DATE,
-       COUNT(*) AS CANDLES
-FROM DERIVATIVE_PRICES GROUP BY CONTRACT_ID ORDER BY CONTRACT_ID;
-```
-
-If `DERIVATIVE_CONTRACTS` is still empty, check the path/name of `data/derivative_contracts.csv` and repeat setup. If mappings exist but prices are empty, inspect the `run.stage_candidates --dataset DERIVATIVES` source warnings and verify that BiznesRadar actually publishes historical rows for the selected contract.
-
-## Other instruments and data quality
-
-- **GPW and foreign stocks:** Ikaros only loads instruments registered from reviewed local equity CSVs, not all tickers available online. Register them with `run.setup_local_duckdb --write`; Yahoo and (for GPW) the configured additional sources supply observations.
-- **WIG20:** registered during local setup; provider quotes pass validation before promotion.
-- **FX:** the reference pairs are in `config/currencies.yaml`; Yahoo market OHLC and NBP reference close-only observations are different quote types. Missing weekends are normal for traded exchange sessions.
-- **Rates:** official interest-rate series are not stock-market candles. Some providers publish observations with weekend dates; Ikaros keeps the source's actual dates rather than forcing a weekday calendar.
-- **Source failures:** missing/invalid observations remain visible. Historical inserts and repeated updates do not overwrite good authoritative values merely because the provider returned a different number.
-
-## Optional: Snowflake and Kafka
-
-The default local commands need neither service. For cloud persistence, install the optional connector:
+From the Ikaros root in PowerShell:
 
 ```powershell
-uv sync --extra snowflake
+.\setup-ikaros.cmd -EnvironmentOnly -Developer
 ```
 
-Set `IKAROS_DB_DRIVER=snowflake` in `.env`, configure the Snowflake account/user and an allowed authentication mechanism, and use `config/database.yaml` for the cloud database, schema and warehouse. Interactive MFA may be required; unattended ingestion should use an approved service identity. `run.check_snowflake_auth` can check the configured connection. Do not store passwords or private keys in version control.
+This provisions the named environment with all optional connector packages and development tools from the lockfile. It does not connect to Snowflake or Kafka, download market data, or remove the old `.venv`.
 
-Kafka is a separate, optional live-transport workflow (`uv sync --extra kafka`, `python -m run.ikaros --help`). It is **not part of the candidate-first DuckDB quick start**.
-
-## Developer notes
-
-The primary ingestion path consists of `run.update_all` / `run.backfill_local` → `run.stage_candidates` → stored, validated candidate rows → `run.promote_candidates`. All authoritative price writes go through the promotion modules under `database/`. Database selection and the local path are controlled by `.env`.
+For PyCharm, choose **Settings → Project → Python Interpreter → Add Interpreter → Add Local Interpreter → Existing environment**, then select `Ikaros\Scripts\python.exe` under the project root. Close and reopen the terminal. The prompt should show `(Ikaros)`. Only after verifying the new interpreter and tests, remove the old `.venv` if desired. Never rename an existing virtual environment in place.
 
 ```powershell
-make test
+make format
 make lint-check
+make test
 ```
 
-Contributions are welcome, especially reviewed instrument registries, provider test fixtures, and improvements to source availability. Please do not commit secrets, unverified derivative IDs, or fabricated OHLC/settlement values.
+Make invokes the named interpreter directly, without activation or uv on PATH. If Make is not installed, activate the environment and use `python -m pytest -q tests`, `python -m ruff check .` and `python -m ruff format --check .`. The authoritative price write boundary remains the existing candidate promotion modules under `database/`.

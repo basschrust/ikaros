@@ -1,9 +1,13 @@
 """DuckDB Ikaros repository; shared pre-1.0 schema authority in database.schema."""
 
 from __future__ import annotations
+
 from pathlib import Path
+
 import duckdb
 import pandas as pd
+
+from database.duckdb_file_lock import DuckDBAccessTimeout, duckdb_access_lock
 from database.schema import prepare_tables as create_all_tables
 
 
@@ -12,8 +16,29 @@ class Repository:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         self.localdb = output_dir / "ikaros.duckdb"
-        self.connection = duckdb.connect(str(self.localdb))
-        self.prepare_tables()
+        # The mutex must precede duckdb.connect and remain held until close.
+        self._access_context = duckdb_access_lock(database_path=self.localdb)
+        try:
+            self._access_context.__enter__()
+        except DuckDBAccessTimeout as exc:
+            # The shared CLI error handler already formats duckdb.IOException.
+            raise duckdb.IOException(str(exc)) from exc
+        try:
+            self.connection = duckdb.connect(str(self.localdb))
+            self.prepare_tables()
+        except BaseException:
+            try:
+                if hasattr(self, "connection"):
+                    self.connection.close()
+            finally:
+                self._release_access_lock()
+            raise
+
+    def _release_access_lock(self) -> None:
+        context = self._access_context
+        self._access_context = None
+        if context is not None:
+            context.__exit__(None, None, None)
 
     def prepare_tables(self) -> None:
         create_all_tables(self.connection, backend="duckdb")
@@ -112,17 +137,20 @@ class Repository:
 
     def get_trading_days(self, calendar_id: int, year: int) -> pd.DataFrame:
         return self.connection.execute(
-            "SELECT date,calendar_id,comment,load_status,load_date FROM trading_days WHERE calendar_id=? AND date>=? AND date<? ORDER BY date",
+            "SELECT date,calendar_id,comment,load_status,load_date FROM trading_days "
+            "WHERE calendar_id=? AND date>=? AND date<? ORDER BY date",
             [calendar_id, f"{year}-01-01", f"{year + 1}-01-01"],
         ).fetchdf()
 
     def get_securities(self, venue: str | None = None) -> pd.DataFrame:
         if venue is None:
             return self.connection.execute(
-                "SELECT asset_id,instrument_class,market_type,name,symbol,currency,calendar_id,init_date,venue FROM securities"
+                "SELECT asset_id,instrument_class,market_type,name,symbol,currency,"
+                "calendar_id,init_date,venue FROM securities"
             ).fetchdf()
         return self.connection.execute(
-            "SELECT asset_id,instrument_class,market_type,name,symbol,currency,calendar_id,init_date,venue FROM securities WHERE venue=?",
+            "SELECT asset_id,instrument_class,market_type,name,symbol,currency,"
+            "calendar_id,init_date,venue FROM securities WHERE venue=?",
             [venue],
         ).fetchdf()
 
@@ -135,7 +163,10 @@ class Repository:
         ).fetchdf()
 
     def close(self) -> None:
-        self.connection.close()
+        try:
+            self.connection.close()
+        finally:
+            self._release_access_lock()
 
     def __enter__(self) -> Repository:
         return self
