@@ -408,11 +408,34 @@ _CREATE_SEQUENCE = re.compile(
 )
 
 
-def _sequence_starts(connection: Any) -> dict[str, int]:
-    """Prevent duplicate generated IDs after export/import (which redefines sequences).
+# Explicit ownership: several candidate tables contain BOTH a CANDIDATE_ID
+# and a PROVIDER_SYMBOL_ID. The generated sequence always belongs to the
+# former; column-name guessing would incorrectly reject those tables.
+# Keep this mapping aligned with the CREATE SEQUENCE definitions in
+# database/schema.py, database/market_quote_schema.py and
+# database/candidate_observations.py.
+SEQUENCE_OWNERS: dict[str, tuple[str, str]] = {
+    "PRICES_CANDIDATES_ID_SEQ": ("PRICES_CANDIDATES", "CANDIDATE_ID"),
+    "INDEX_PRICE_CANDIDATES_ID_SEQ": ("INDEX_PRICE_CANDIDATES", "CANDIDATE_ID"),
+    "DERIVATIVE_PRICE_CANDIDATES_ID_SEQ": ("DERIVATIVE_PRICE_CANDIDATES", "CANDIDATE_ID"),
+    "FX_RATE_CANDIDATES_ID_SEQ": ("FX_RATE_CANDIDATES", "CANDIDATE_ID"),
+    "RATE_OBSERVATION_CANDIDATES_ID_SEQ": ("RATE_OBSERVATION_CANDIDATES", "CANDIDATE_ID"),
+    "INDEX_PROVIDER_SYMBOLS_ID_SEQ": ("INDEX_PROVIDER_SYMBOLS", "PROVIDER_SYMBOL_ID"),
+    "DERIVATIVE_PROVIDER_SYMBOLS_ID_SEQ": ("DERIVATIVE_PROVIDER_SYMBOLS", "PROVIDER_SYMBOL_ID"),
+}
 
-    This rule is restricted to Ikaros's monotonic *_ID_SEQ sequences. Unknown
-    used sequences cannot be repaired automatically and block the rebuild.
+
+def _sequence_starts(connection: Any) -> dict[str, int]:
+    """Restart known sequences beyond both their used value and stored IDs.
+
+    DuckDB EXPORT DATABASE exports CREATE SEQUENCE declarations, not the live
+    sequence counter. A rebuilt database must never generate previously used
+    identifiers, including IDs deleted from their tables.
+
+    Unknown *used* sequences fail closed. Unknown unused sequences retain their
+    original export definition. An explicitly mapped sequence with an existing
+    table is checked even if it has not yet been used: manually inserted rows
+    might already occupy its initial range.
     """
     sequences = connection.execute(
         "SELECT schema_name, sequence_name, start_value, increment_by, "
@@ -426,20 +449,33 @@ def _sequence_starts(connection: Any) -> dict[str, int]:
         ).fetchall()
     }
     starts: dict[str, int] = {}
-    for schema, name, first, increment, last, cycle in sequences:
-        name = str(name).upper()
-        schema = str(schema).upper()
-        # Unused sequences have not advanced; retain their exported START.
-        if last is None:
-            continue
-        if not name.endswith("_ID_SEQ") or increment != 1 or cycle:
+    seen_names: set[str] = set()
+    for schema_raw, name_raw, first, increment, last, cycle in sequences:
+        name = str(name_raw).upper()
+        schema = str(schema_raw).upper()
+        if name in seen_names:
             raise UnsafeNumericMigration(
-                f"Used sequence {schema}.{name} has no safe ID restart policy; "
-                "the original database has not been changed"
+                f"Duplicate sequence name {name} across schemas; "
+                "the exported SQL rewrite cannot disambiguate it safely"
             )
-        table = name[: -len("_ID_SEQ")]
+        seen_names.add(name)
+        owner = SEQUENCE_OWNERS.get(name)
+        if owner is None:
+            if last is not None:
+                raise UnsafeNumericMigration(
+                    f"Used sequence {schema}.{name} has no declared ID owner; "
+                    "the original database has not been changed"
+                )
+            continue
+        if int(increment) != 1 or bool(cycle):
+            raise UnsafeNumericMigration(
+                f"Sequence {schema}.{name} is not a monotonic, non-cycling +1 ID generator"
+            )
+        table, id_column = owner
         if (schema, table) not in known_tables:
-            raise UnsafeNumericMigration(f"Sequence {name} has no registered source table {table}")
+            raise UnsafeNumericMigration(
+                f"Sequence {schema}.{name} references missing table {schema}.{table}"
+            )
         identifiers = {
             str(c).upper()
             for (c,) in connection.execute(
@@ -448,16 +484,18 @@ def _sequence_starts(connection: Any) -> dict[str, int]:
                 (schema, table),
             ).fetchall()
         }
-        possible = [c for c in ("CANDIDATE_ID", "PROVIDER_SYMBOL_ID", "ID") if c in identifiers]
-        if len(possible) != 1:
+        if id_column not in identifiers:
             raise UnsafeNumericMigration(
-                f"Could not identify unique ID field for sequence {name} on table {table}"
+                f"Sequence {schema}.{name} expects {table}.{id_column}, which is missing"
             )
         max_id = _count(
             connection,
-            f"SELECT COALESCE(MAX({_ident(possible[0])}),0) FROM {_ident(schema)}.{_ident(table)}",
+            f"SELECT COALESCE(MAX({_ident(id_column)}),0) FROM {_ident(schema)}.{_ident(table)}",
         )
-        target = max(int(first), max_id + 1)
+        # `last` can exceed MAX(id) when identifiers have been reserved then
+        # rolled back or their corresponding rows were later deleted. Respect
+        # the live counter as well as all stored IDs.
+        target = max(int(first), max_id + 1, (int(last) + 1) if last is not None else int(first))
         starts[name] = target
     return starts
 
