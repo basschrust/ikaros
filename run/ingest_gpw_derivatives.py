@@ -23,12 +23,13 @@ DDL = (
     """CREATE TABLE IF NOT EXISTS "DERIVATIVE_CONTRACTS" (
         "CONTRACT_ID" VARCHAR, "SYMBOL" VARCHAR, "INSTRUMENT_TYPE" VARCHAR,
         "UNDERLYING_SYMBOL" VARCHAR, "EXPIRY_DATE" DATE, "CURRENCY" VARCHAR,
-        "MULTIPLIER" FLOAT, "STRIKE" FLOAT, "OPTION_SIDE" VARCHAR,
+        "MULTIPLIER" NUMBER(18,4), "STRIKE" NUMBER(24,8), "OPTION_SIDE" VARCHAR,
         "SOURCE" VARCHAR, "CREATED_AT" TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP())""",
     """CREATE TABLE IF NOT EXISTS "DERIVATIVE_PRICES" (
-        "CONTRACT_ID" VARCHAR, "DATE" DATE, "OPEN" FLOAT, "HIGH" FLOAT,
-        "LOW" FLOAT, "CLOSE" FLOAT, "VOLUME" FLOAT,
-        "OPEN_INTEREST" FLOAT, "SETTLEMENT" FLOAT, "SOURCE" VARCHAR,
+        "CONTRACT_ID" VARCHAR, "DATE" DATE, "OPEN" NUMBER(24,8),
+        "HIGH" NUMBER(24,8), "LOW" NUMBER(24,8), "CLOSE" NUMBER(24,8),
+        "VOLUME" NUMBER(38,0), "OPEN_INTEREST" NUMBER(38,0),
+        "SETTLEMENT" NUMBER(24,8), "SOURCE" VARCHAR,
         "INGESTED_AT" TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP())""",
 )
 
@@ -51,23 +52,17 @@ def check_references(
             '"MULTIPLIER", "STRIKE", "OPTION_SIDE", "SOURCE" '
             'FROM "DERIVATIVE_CONTRACTS"'
         )
-
         current = {row[0]: row[1:] for row in cur.fetchall()}
-
         for row in contracts.itertuples(index=False, name=None):
             contract_id, *attributes = row
-
             existing = current.get(contract_id)
-
             if existing is not None:
                 if tuple(map(comparable, existing)) != tuple(map(comparable, attributes)):
                     raise ValueError(f"Contract specification conflict: {contract_id}")
                 continue
-
             if not write:
                 log.info("NEW CONTRACT %s", contract_id)
                 continue
-
             cur.execute(
                 'INSERT INTO "DERIVATIVE_CONTRACTS" '
                 '("CONTRACT_ID", "SYMBOL", "INSTRUMENT_TYPE", '
@@ -76,7 +71,6 @@ def check_references(
                 "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 tuple(map(comparable, row)),
             )
-
             log.info("REGISTERED CONTRACT %s", contract_id)
 
 

@@ -3,6 +3,7 @@
 This module preserves the pre-refactor MERGE semantics. It does not change the
 separate policy about whether raw Kafka GPW writes should be allowed to bypass
 the batch candidate pipeline; that requires a separate controlled migration.
+The legacy SQL boundary uses explicit NUMBER precision, never FLOAT casts.
 """
 
 from __future__ import annotations
@@ -33,10 +34,11 @@ def upsert_observation(connection: Any, event: Observation) -> None:
     if event.dataset == "FX":
         pid = pair_id(connection, event.symbol)
         sql = """MERGE INTO "FX_RATES" t USING (
-            SELECT %s::NUMBER AS id, %s::VARCHAR AS symbol,
+            SELECT %s::NUMBER(38,0) AS id, %s::VARCHAR AS symbol,
                    TO_TIMESTAMP_NTZ(%s, 'YYYY-MM-DD') AS dt,
-                   %s::FLOAT AS op, %s::FLOAT AS hi, %s::FLOAT AS lo,
-                   %s::FLOAT AS cl, %s::FLOAT AS vol
+                   %s::NUMBER(24,10) AS op, %s::NUMBER(24,10) AS hi,
+                   %s::NUMBER(24,10) AS lo, %s::NUMBER(24,10) AS cl,
+                   %s::NUMBER(38,0) AS vol
         ) s ON t."CURRENCY_PAIR_ID" = s.id AND TO_DATE(t."DATE") = TO_DATE(s.dt)
         WHEN MATCHED THEN UPDATE SET
             t."OPEN" = COALESCE(s.op, t."OPEN"),
@@ -61,9 +63,11 @@ def upsert_observation(connection: Any, event: Observation) -> None:
         sql = """MERGE INTO "PRICES" t USING (
             SELECT %s::VARCHAR AS symbol,
                    TO_TIMESTAMP_NTZ(%s, 'YYYY-MM-DD') AS dt,
-                   %s::FLOAT AS op, %s::FLOAT AS hi, %s::FLOAT AS lo,
-                   %s::FLOAT AS cl, %s::FLOAT AS vol,
-                   %s::FLOAT AS dividend, %s::FLOAT AS split_ratio
+                   %s::NUMBER(24,8) AS op, %s::NUMBER(24,8) AS hi,
+                   %s::NUMBER(24,8) AS lo, %s::NUMBER(24,8) AS cl,
+                   %s::NUMBER(38,0) AS vol,
+                   %s::NUMBER(24,8) AS dividend,
+                   %s::NUMBER(24,8) AS split_ratio
         ) s ON t."SYMBOL" = s.symbol AND TO_DATE(t."DATE") = TO_DATE(s.dt)
         WHEN MATCHED THEN UPDATE SET
             t."OPEN" = COALESCE(s.op, t."OPEN"),

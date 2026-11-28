@@ -27,6 +27,7 @@ WEIGHT_FIELDS = {
 CONTRACT_FIELDS = {
     "contract_id",
     "symbol",
+    "venue",
     "instrument_type",
     "underlying_symbol",
     "expiry_date",
@@ -120,6 +121,11 @@ def validate_contracts(*, rows: list[dict[str, str]]) -> list[dict[str, Any]]:
             raise ValueError(f"Contract {cid}: symbol must equal the verified contract ID")
         if item["underlying_symbol"].upper() != "WIG20":
             raise ValueError(f"Contract {cid}: only WIG20 supported")
+        # This importer is specifically for GPW WIG20 contracts. Do not accept
+        # an unknown venue or silently infer it from the symbol or underlying.
+        venue = item.get("venue", "").upper().strip()
+        if venue != "GPW":
+            raise ValueError(f"Contract {cid}: reviewed WIG20 venue must be GPW, got {venue!r}")
         expiry = date.fromisoformat(item["expiry_date"])
         currency = item["currency"].upper()
         if currency != "PLN":
@@ -141,6 +147,7 @@ def validate_contracts(*, rows: list[dict[str, str]]) -> list[dict[str, Any]]:
             {
                 "contract_id": cid,
                 "symbol": cid,
+                "venue": venue,
                 "instrument_type": kind,
                 "underlying_symbol": "WIG20",
                 "expiry_date": expiry,
@@ -207,6 +214,7 @@ def store_weights(*, connection: Any, as_of: date, items: list[dict[str, Any]]) 
 def store_contracts(*, connection: Any, items: list[dict[str, Any]]) -> int:
     fields = (
         "SYMBOL",
+        "VENUE",
         "INSTRUMENT_TYPE",
         "UNDERLYING_SYMBOL",
         "EXPIRY_DATE",

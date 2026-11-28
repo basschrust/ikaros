@@ -1,3 +1,3 @@
-contract_id,instrument_type,underlying_symbol,expiry_date
-FW20Z2620,FUTURE,WIG20,2026-12-18
-OW20L264250,OPTION,WIG20,2026-12-18
+contract_id,venue,instrument_type,underlying_symbol,expiry_date
+FW20Z2620,GPW,FUTURE,WIG20,2026-12-18
+OW20L264250,GPW,OPTION,WIG20,2026-12-18

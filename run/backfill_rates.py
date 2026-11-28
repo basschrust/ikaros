@@ -2,6 +2,7 @@
 
 The daily updater stages candidates via `ingestion.candidate_stage_job`; this
 legacy direct-to-final write entrypoint is blocked by candidate guard.
+Rates and bid/ask are fixed-point NUMBER(24,10), including temporary stages.
 """
 
 from __future__ import annotations
@@ -59,8 +60,8 @@ SCHEMA_DDL = (
        "IS_ACTIVE" BOOLEAN DEFAULT TRUE,
        "CREATED_AT" TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP())""",
     """CREATE TABLE IF NOT EXISTS "RATE_OBSERVATIONS" (
-       "SERIES_ID" VARCHAR, "DATE" DATE, "RATE" FLOAT,
-       "SOURCE" VARCHAR, "BID" FLOAT, "ASK" FLOAT,
+       "SERIES_ID" VARCHAR, "DATE" DATE, "RATE" NUMBER(24,10),
+       "SOURCE" VARCHAR, "BID" NUMBER(24,10), "ASK" NUMBER(24,10),
        "INGESTED_AT" TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP())""",
 )
 
@@ -76,11 +77,11 @@ def persist(
     with connection.cursor() as cur:
         for ddl in SCHEMA_DDL:
             cur.execute(ddl)
-        cur.execute('ALTER TABLE "RATE_OBSERVATIONS" ADD COLUMN IF NOT EXISTS "BID" FLOAT')
-        cur.execute('ALTER TABLE "RATE_OBSERVATIONS" ADD COLUMN IF NOT EXISTS "ASK" FLOAT')
+        cur.execute('ALTER TABLE "RATE_OBSERVATIONS" ADD COLUMN IF NOT EXISTS "BID" NUMBER(24,10)')
+        cur.execute('ALTER TABLE "RATE_OBSERVATIONS" ADD COLUMN IF NOT EXISTS "ASK" NUMBER(24,10)')
         cur.execute("""CREATE TEMP TABLE IF NOT EXISTS "IKAROS_RATE_STAGE" (
-            "SERIES_ID" VARCHAR, "DATE" DATE, "RATE" FLOAT, "SOURCE" VARCHAR,
-            "BID" FLOAT, "ASK" FLOAT)""")
+            "SERIES_ID" VARCHAR, "DATE" DATE, "RATE" NUMBER(24,10), "SOURCE" VARCHAR,
+            "BID" NUMBER(24,10), "ASK" NUMBER(24,10))""")
         try:
             cur.execute("BEGIN")
             for spec in series.values():

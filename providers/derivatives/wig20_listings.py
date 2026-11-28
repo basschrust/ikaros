@@ -37,9 +37,12 @@ class ListedContract:
     reported_expiry: date | None
 
     def manifest_row(self) -> dict[str, str]:
+        # This source adapter is dedicated to listed GPW WIG20 contracts.
+        # VENUE is explicit source context, not derived from FUTURE/OPTION.
         return {
             "contract_id": self.symbol,
             "symbol": self.symbol,
+            "venue": "GPW",
             "instrument_type": self.kind,
             "underlying_symbol": "WIG20",
             "expiry_date": self.expiry.isoformat(),

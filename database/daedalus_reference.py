@@ -1,6 +1,6 @@
 """Additive local DuckDB reference schema needed by Daedalus.
 
-Never drops tables, rewrites existing authoritative prices, or manufactures contracts.
+Never drops tables, rewrites accepted prices, or invents venue assignments.
 """
 
 from __future__ import annotations
@@ -9,6 +9,7 @@ from typing import Any
 
 CONTRACT_TYPES: dict[str, str] = {
     "SYMBOL": "VARCHAR",
+    "VENUE": "VARCHAR",
     "CURRENCY": "VARCHAR",
     "MULTIPLIER": "DECIMAL(18,4)",
     "STRIKE": "DECIMAL(24,8)",
@@ -18,7 +19,11 @@ CONTRACT_TYPES: dict[str, str] = {
 
 
 def ensure_reference_schema(connection: Any) -> None:
-    """Create missing index membership and extend the legacy four-field contract registry."""
+    """Create missing index membership and extend the legacy contract registry.
+
+    Important: previous rows do not acquire a guessed VENUE. A verified
+    reference importer can enrich those records; otherwise they remain NULL.
+    """
     connection.execute(
         """CREATE TABLE IF NOT EXISTS "INDEX_CONSTITUENTS" (
             "INDEX_SYMBOL" VARCHAR NOT NULL,
@@ -29,7 +34,6 @@ def ensure_reference_schema(connection: Any) -> None:
             "SOURCE" VARCHAR NOT NULL
         )"""
     )
-    # Local bootstrap creates the original 4-column DERIVATIVE_CONTRACTS first.
     present = {
         str(name).upper()
         for (name,) in connection.execute(
