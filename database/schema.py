@@ -3,12 +3,18 @@
 Existing hash-key deployments require sql/20261118_integer_candidate_ids.sql
 before running a repository with this version. Schema initialization is
 idempotent; it never silently converts or drops persisted price candles.
+
+Fixed-point market data is defined here for new databases. Upgrading a
+populated older database is an explicit, backed-up operation via
+``python -m run.numeric_storage``; never automatically round old quotes.
 """
 
 from __future__ import annotations
 
 import re
 from typing import Any, Literal
+
+from database.numeric_contract import COUNT, FX, PRICE
 
 Backend = Literal["duckdb", "snowflake"]
 CANDIDATE_ID_SEQUENCE = "PRICES_CANDIDATES_ID_SEQ"
@@ -35,7 +41,7 @@ BASE_COLUMNS: dict[str, dict[str, str]] = {
         "instrument_class": "VARCHAR",
         "market_type": "VARCHAR",
         "name": "VARCHAR",
-        "reference_price": "DOUBLE",
+        "reference_price": PRICE,
         "symbol": "VARCHAR",
         "currency": "VARCHAR",
         "calendar_id": "BIGINT",
@@ -46,13 +52,13 @@ BASE_COLUMNS: dict[str, dict[str, str]] = {
     "prices": {
         "symbol": "VARCHAR",
         "date": "TIMESTAMP",
-        "open": "DOUBLE",
-        "high": "DOUBLE",
-        "low": "DOUBLE",
-        "close": "DOUBLE",
-        "volume": "DOUBLE",
-        "dividend": "DOUBLE",
-        "split_ratio": "DOUBLE",
+        "open": PRICE,
+        "high": PRICE,
+        "low": PRICE,
+        "close": PRICE,
+        "volume": COUNT,
+        "dividend": PRICE,
+        "split_ratio": PRICE,
         "asset_id": "BIGINT",
         "provider_id": "BIGINT",
         "candidate_id": "BIGINT",
@@ -82,11 +88,11 @@ BASE_COLUMNS: dict[str, dict[str, str]] = {
         "currency_pair_id": "BIGINT",
         "symbol": "VARCHAR",
         "date": "TIMESTAMP",
-        "open": "DOUBLE",
-        "high": "DOUBLE",
-        "low": "DOUBLE",
-        "close": "DOUBLE",
-        "volume": "DOUBLE",
+        "open": FX,
+        "high": FX,
+        "low": FX,
+        "close": FX,
+        "volume": COUNT,
         "comment": "VARCHAR",
         "ingested_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
     },
@@ -119,13 +125,13 @@ NEW_COLUMNS: dict[str, dict[str, str]] = {
         "provider_symbol_id": "BIGINT NOT NULL",
         "symbol": "VARCHAR(128) NOT NULL",
         "date": "DATE NOT NULL",
-        "open": "DECIMAL(24,8)",
-        "high": "DECIMAL(24,8)",
-        "low": "DECIMAL(24,8)",
-        "close": "DECIMAL(24,8) NOT NULL",
-        "volume": "DECIMAL(38,0)",
-        "dividend": "DECIMAL(24,8)",
-        "split_ratio": "DECIMAL(24,8)",
+        "open": PRICE,
+        "high": PRICE,
+        "low": PRICE,
+        "close": f"{PRICE} NOT NULL",
+        "volume": COUNT,
+        "dividend": PRICE,
+        "split_ratio": PRICE,
         "validation_status": "VARCHAR(16) NOT NULL DEFAULT 'PENDING'",
         "validation_reason": "VARCHAR",
         "source_timestamp": "TIMESTAMP",
@@ -221,7 +227,6 @@ def prepare_tables(connection: Any, *, backend: Backend) -> None:
                 'ALTER TABLE "SECURITIES" ADD CONSTRAINT "PK_SECURITIES_ASSET_ID" '
                 'PRIMARY KEY ("ASSET_ID")',
             )
-    # Sequence is created once. Never recreate/restart it on future runs.
     _execute(
         connection,
         f'CREATE SEQUENCE IF NOT EXISTS "{CANDIDATE_ID_SEQUENCE}" START WITH 1 INCREMENT BY 1',
@@ -235,7 +240,8 @@ def prepare_tables(connection: Any, *, backend: Backend) -> None:
         "prices_candidates": [
             'FOREIGN KEY ("ASSET_ID") REFERENCES "SECURITIES"("ASSET_ID")',
             'FOREIGN KEY ("PROVIDER_ID") REFERENCES "PROVIDERS"("PROVIDER_ID")',
-            'FOREIGN KEY ("PROVIDER_SYMBOL_ID") REFERENCES "PROVIDER_SYMBOLS"("PROVIDER_SYMBOL_ID")',
+            'FOREIGN KEY ("PROVIDER_SYMBOL_ID") REFERENCES '
+            '"PROVIDER_SYMBOLS"("PROVIDER_SYMBOL_ID")',
             "CHECK (\"VALIDATION_STATUS\" IN ('PENDING','VALID','REJECTED','REVIEW'))",
         ],
     }
@@ -261,7 +267,13 @@ def diagnostics(connection: Any) -> dict[str, int]:
     """Post-upgrade reconciliation counts; does not change data."""
     checks = {
         "unmapped_prices": 'SELECT COUNT(*) FROM "PRICES" WHERE "ASSET_ID" IS NULL',
-        "duplicate_asset_dates": 'SELECT COUNT(*) FROM (SELECT "ASSET_ID", CAST("DATE" AS DATE) FROM "PRICES" WHERE "ASSET_ID" IS NOT NULL GROUP BY "ASSET_ID",CAST("DATE" AS DATE) HAVING COUNT(*) > 1)',
-        "unprovenanced_prices": 'SELECT COUNT(*) FROM "PRICES" WHERE "PROVIDER_ID" IS NULL OR "CANDIDATE_ID" IS NULL',
+        "duplicate_asset_dates": (
+            'SELECT COUNT(*) FROM (SELECT "ASSET_ID", CAST("DATE" AS DATE) '
+            'FROM "PRICES" WHERE "ASSET_ID" IS NOT NULL '
+            'GROUP BY "ASSET_ID", CAST("DATE" AS DATE) HAVING COUNT(*) > 1)'
+        ),
+        "unprovenanced_prices": (
+            'SELECT COUNT(*) FROM "PRICES" WHERE "PROVIDER_ID" IS NULL OR "CANDIDATE_ID" IS NULL'
+        ),
     }
     return {name: int(_fetch(connection, sql)[0][0]) for name, sql in checks.items()}

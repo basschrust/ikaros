@@ -13,8 +13,8 @@ from __future__ import annotations
 import argparse
 from contextlib import closing
 from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import logging
-import math
 import re
 import time
 
@@ -46,13 +46,14 @@ DDL = """CREATE TABLE IF NOT EXISTS "US_OPTION_CHAIN_SNAPSHOTS" (
     "CONTRACT_SYMBOL" VARCHAR NOT NULL,
     "EXPIRY_DATE" DATE NOT NULL,
     "OPTION_SIDE" VARCHAR NOT NULL,
-    "STRIKE" FLOAT NOT NULL,
+    "STRIKE" NUMBER(24,8) NOT NULL,
     "CURRENCY" VARCHAR NOT NULL,
     "QUOTE_DATE" DATE NOT NULL,
     "CAPTURED_AT" TIMESTAMP_NTZ NOT NULL,
     "LAST_TRADE_AT" TIMESTAMP_NTZ,
-    "BID" FLOAT, "ASK" FLOAT, "LAST_PRICE" FLOAT,
-    "VOLUME" FLOAT, "OPEN_INTEREST" FLOAT, "IMPLIED_VOLATILITY" FLOAT,
+    "BID" NUMBER(24,8), "ASK" NUMBER(24,8), "LAST_PRICE" NUMBER(24,8),
+    "VOLUME" NUMBER(38,0), "OPEN_INTEREST" NUMBER(38,0),
+    "IMPLIED_VOLATILITY" NUMBER(24,12),
     "SOURCE" VARCHAR NOT NULL
 )"""
 STAGE = 'CREATE TEMP TABLE IF NOT EXISTS "IKAROS_US_OPTION_SNAPSHOT_STAGE" LIKE "US_OPTION_CHAIN_SNAPSHOTS"'
@@ -76,13 +77,25 @@ MERGE = """MERGE INTO "US_OPTION_CHAIN_SNAPSHOTS" t
     )"""
 
 
-def optional_number(value: object, field: str) -> float | None:
+def optional_number(value: object, field: str) -> Decimal | None:
+    """Convert input without a new binary-float round trip; enforce scale."""
     if value is None or pd.isna(value):
         return None
-    number = float(value)
-    if not math.isfinite(number) or number < 0:
+    try:
+        number = Decimal(str(value))
+    except (ValueError, InvalidOperation) as exc:
+        raise ValueError(f"Invalid {field}: {value!r}") from exc
+    if not number.is_finite() or number < 0:
         raise ValueError(f"Invalid {field}: {value!r}")
-    return number
+    if field in {"volume", "openInterest"}:
+        if number != number.to_integral_value() or number >= Decimal("1e38"):
+            raise ValueError(f"Invalid integral {field}: {value!r}")
+        return number.to_integral_value()
+    scale = 12 if field == "impliedVolatility" else 8
+    fixed = number.quantize(Decimal(1).scaleb(-scale), rounding=ROUND_HALF_UP)
+    if abs(fixed) >= Decimal(10) ** (24 - scale):
+        raise ValueError(f"Out-of-range {field}: {value!r}")
+    return fixed
 
 
 def naive_utc(value: object) -> datetime | None:
@@ -115,11 +128,11 @@ def normalize_chain(
             raise ValueError(f"Invalid OCC contract symbol: {sym!r}")
         root, expcode, cp, strikecode = match.groups()
         parsed_exp = datetime.strptime(expcode, "%y%m%d").date()
-        parsed_strike = int(strikecode) / 1000
+        parsed_strike = Decimal(strikecode) / 1000
         if root != underlying or parsed_exp != expiry or cp != side[0]:
             raise ValueError(f"Unexpected/adjusted option contract: {sym}")
         strike = optional_number(rec.get("strike"), "strike")
-        if strike is None or strike <= 0 or not math.isclose(strike, parsed_strike, abs_tol=1e-6):
+        if strike is None or strike <= 0 or abs(strike - parsed_strike) > Decimal("0.000001"):
             raise ValueError(f"Strike mismatch: {sym}")
         last_trade = naive_utc(rec.get("lastTradeDate"))
         if last_trade is not None and last_trade > now:
@@ -145,7 +158,6 @@ def normalize_chain(
             "source": "yfinance|option_chain",
         }
         if row["bid"] is not None and row["ask"] is not None and row["bid"] > row["ask"]:
-            # Crossed or stale markets should not be treated as validated quotes.
             LOG.warning("CROSSED MARKET %s bid=%s ask=%s", sym, row["bid"], row["ask"])
         result.append(row)
     if len({r["contract_symbol"] for r in result}) != len(result):

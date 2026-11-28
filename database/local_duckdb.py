@@ -9,6 +9,7 @@ from database.daedalus_reference import ensure_reference_schema
 from database.duckdb_compat import CompatibleConnection
 from database.duckdb_storage import Repository
 from database.market_quote_schema import ensure_market_quote_schema
+from database.numeric_contract import classify
 
 
 class LocalDuckDBRepository(Repository):
@@ -19,26 +20,9 @@ class LocalDuckDBRepository(Repository):
 
     def prepare_tables(self) -> None:
         super().prepare_tables()
-        # New local files must retain decimal price precision rather than the
-        # pre-1.0 DOUBLE base schema. Never rewrite a populated legacy table.
-        for table in ("PRICES", "FX_RATES"):
-            count = self.connection.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
-            if count:
-                continue
-            existing = {
-                str(column).upper(): str(datatype).upper()
-                for column, datatype in self.connection.execute(
-                    "SELECT column_name, data_type FROM information_schema.columns "
-                    "WHERE lower(table_name)=? AND table_schema=current_schema()",
-                    (table.lower(),),
-                ).fetchall()
-            }
-            for column in ("OPEN", "HIGH", "LOW", "CLOSE", "VOLUME"):
-                target = "DECIMAL(38,0)" if column == "VOLUME" else "DECIMAL(24,8)"
-                if existing.get(column) != target:
-                    self.connection.execute(
-                        f'ALTER TABLE "{table}" ALTER COLUMN "{column}" TYPE {target}'
-                    )
+        # database.schema now creates fixed-point types on every fresh install.
+        # Do not silently coerce historic FLOAT/DOUBLE prices: this needs an
+        # explicit, checkpointed backup and a preflight of existing values.
         self.connection = CompatibleConnection(self.connection)
         self.connection.execute(
             """CREATE TABLE IF NOT EXISTS "DERIVATIVE_CONTRACTS" (
@@ -53,6 +37,20 @@ class LocalDuckDBRepository(Repository):
         ensure_market_quote_schema(self.connection, backend="duckdb")
         ensure_fx_rate_candidates(self.connection, backend="duckdb")
 
-        # The stock schema's older floating-point authoritative columns are
-        # intentionally preserved on an existing database. New candidate rows
-        # are already DECIMAL(24,8) and integer-volume.
+        existing = self.connection.execute(
+            "SELECT table_name, column_name, data_type FROM information_schema.columns "
+            "WHERE table_schema=current_schema()"
+        ).fetchall()
+        incompatible = [
+            f"{item.table}.{item.name} ({item.actual})"
+            for item in classify([(str(t), str(c), str(d)) for t, c, d in existing])
+            if item.unknown_float or item.unknown_storage or item.needs_conversion
+        ]
+        if incompatible:
+            sample = ", ".join(incompatible[:6])
+            raise RuntimeError(
+                "Local market database has non-compliant persisted numeric columns: "
+                f"{sample}. Audit and migrate with: python -m run.numeric_storage "
+                f"--database '{self.localdb}' --write. First run without --write "
+                "to inspect the plan; close DBeaver before migration."
+            )

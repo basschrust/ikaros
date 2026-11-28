@@ -57,8 +57,8 @@ def test_invalid_bill_headers_fail_closed():
         )
 
 
-def test_schema_has_nullable_quote_fields():
-    assert any('"BID" FLOAT' in ddl and '"ASK" FLOAT' in ddl for ddl in SCHEMA_DDL)
+def test_schema_has_nullable_fixed_point_quote_fields():
+    assert any('"BID" NUMBER(24,10)' in ddl and '"ASK" NUMBER(24,10)' in ddl for ddl in SCHEMA_DDL)
     assert (
         QuoteableRateObservation("TEST", date(2026, 1, 1), 0.03, bid=0.029, ask=0.031).bid == 0.029
     )
@@ -70,8 +70,8 @@ def test_bill_tenor_qualified_coupon_headers_and_extra_columns():
     for week in (4, 6, 8, 13, 17, 26, 52):
         header.extend([f"{week} WEEKS BANK DISCOUNT", "other", f"{week} WEEKS COUPON EQUIVALENT"])
         record.extend(["3.5", "N/A", "3.6"])
-    text = ",".join(header) + "\n" + ",".join(record) + "\n"
-    rows = parse_bill_csv(text, date(2026, 11, 1), date(2026, 11, 11))
+    content = ",".join(header) + "\n" + ",".join(record) + "\n"
+    rows = parse_bill_csv(content, date(2026, 11, 1), date(2026, 11, 11))
     assert len(rows) == 14
     assert next(x.rate for x in rows if x.series_id == "UST_BILL_COUPON_USD_4W") == pytest.approx(
         0.036
@@ -84,5 +84,5 @@ def test_bill_generic_coupon_headers_with_extra_columns():
     for week in (4, 6, 8, 13, 17, 26, 52):
         header.extend([f"{week} WEEKS BANK DISCOUNT", "EXTRA", "COUPON EQUIVALENT"])
         record.extend(["3.5", "N/A", "3.6"])
-    text = ",".join(header) + "\n" + ",".join(record) + "\n"
-    assert len(parse_bill_csv(text, date(2026, 11, 1), date(2026, 11, 11))) == 14
+    content = ",".join(header) + "\n" + ",".join(record) + "\n"
+    assert len(parse_bill_csv(content, date(2026, 11, 1), date(2026, 11, 11))) == 14
